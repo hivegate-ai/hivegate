@@ -1,5 +1,6 @@
 from typing import Any, Optional, Union
 
+from agno.models.deepseek import DeepSeek
 from agno.models.google import Gemini
 from agno.models.openai.like import OpenAILike
 from agno.models.xai import xAI
@@ -20,6 +21,7 @@ def create_model(
     anthropic_api_key: Optional[str] = None,
     xai_api_key: Optional[str] = None,
     zai_api_key: Optional[str] = None,
+    deepseek_api_key: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
 ) -> Any:
@@ -35,11 +37,12 @@ def create_model(
         anthropic_api_key: Anthropic API key (required for Claude models)
         xai_api_key: xAI API key (required for Grok models)
         zai_api_key: Z.ai API key (required for GLM models)
+        deepseek_api_key: DeepSeek API key (required for DeepSeek models)
         temperature: Optional temperature setting
         max_tokens: Optional max tokens setting
 
     Returns:
-        Configured Agno model instance (OpenAI Responses, Gemini, Claude, xAI or Z.ai)
+        Configured Agno model instance (OpenAI Responses, Gemini, Claude, xAI, Z.ai or DeepSeek)
 
     Raises:
         ValueError: If the provider is unknown or required API key is missing
@@ -125,6 +128,18 @@ def create_model(
             kwargs["max_tokens"] = max_tokens
 
         return OpenAILike(**kwargs)
+
+    elif provider == ModelProvider.DEEPSEEK:
+        if not deepseek_api_key:
+            raise ValueError("DeepSeek API key is required for DeepSeek models")
+
+        kwargs = {"id": model_id, "api_key": deepseek_api_key}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+
+        return DeepSeek(**kwargs)
 
     else:
         raise ValueError(f"Unknown model provider: {provider}")

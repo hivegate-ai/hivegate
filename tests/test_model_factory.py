@@ -76,6 +76,21 @@ class TestCreateModel(unittest.TestCase):
             create_model(Model.glm_5_3)
         self.assertIn("Z.ai", str(ctx.exception))
 
+    def test_create_deepseek_model(self):
+        from agno.models.deepseek import DeepSeek
+
+        result = create_model(Model.deepseek_v4_pro, deepseek_api_key="test-key", max_tokens=321)
+
+        self.assertIsInstance(result, DeepSeek)
+        self.assertEqual(result.id, "deepseek-v4-pro")
+        self.assertEqual(result.base_url, "https://api.deepseek.com")
+        self.assertEqual(result.max_tokens, 321)
+
+    def test_missing_deepseek_api_key_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            create_model(Model.deepseek_flash)
+        self.assertIn("DeepSeek", str(ctx.exception))
+
     def test_missing_xai_api_key_raises(self):
         with self.assertRaises(ValueError) as ctx:
             create_model(Model.grok_4_7)

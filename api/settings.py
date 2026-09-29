@@ -37,6 +37,7 @@ class ApiSettings(BaseSettings):
     anthropic_api_key: str = Field(default="", description="Anthropic API key")
     xai_api_key: str = Field(default="", description="xAI API key (Grok models)")
     zai_api_key: str = Field(default="", description="Z.ai API key (GLM models)")
+    deepseek_api_key: str = Field(default="", description="DeepSeek API key")
 
     # Bright Data settings
     bright_data_api_key: str = Field(default="", description="Bright Data API key")
@@ -95,6 +96,10 @@ class ApiSettings(BaseSettings):
     @field_validator("zai_api_key", mode="before")
     def set_zai_api_key(cls, zai_api_key, info: FieldValidationInfo):
         return os.environ.get("ZAI_API_KEY", "")
+
+    @field_validator("deepseek_api_key", mode="before")
+    def set_deepseek_api_key(cls, deepseek_api_key, info: FieldValidationInfo):
+        return os.environ.get("DEEPSEEK_API_KEY", "")
 
     @field_validator("bright_data_api_key", mode="before")
     def set_bright_data_api_key(cls, bright_data_api_key, info: FieldValidationInfo):

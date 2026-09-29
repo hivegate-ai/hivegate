@@ -99,6 +99,12 @@ class Model(str, Enum):
     glm_4_7 = "glm-4.7"
     glm_4_7_flash = "glm-4.7-flash"
 
+    # ===== DeepSeek Models =====
+    # deepseek-flash is a moving name (now V4.1-Flash); the legacy deepseek-v4-flash
+    # name is still accepted but its model was retired, so it is not listed.
+    deepseek_flash = "deepseek-flash"
+    deepseek_v4_pro = "deepseek-v4-pro"
+
     # ===== Latest of a tier (resolved per vendor, see agents/model_resolver.py) =====
     # Follow the vendor's newest model in a tier without a code change, never jumping
     # to a pricier tier. Prefer these over the pinned ids above for defaults.
@@ -121,6 +127,7 @@ class ModelProvider(str, Enum):
     ANTHROPIC = "anthropic"
     XAI = "xai"
     ZAI = "zai"
+    DEEPSEEK = "deepseek"
 
 
 def get_provider(model: Union[Model, str]) -> ModelProvider:
@@ -136,6 +143,8 @@ def get_provider(model: Union[Model, str]) -> ModelProvider:
         return ModelProvider.XAI
     elif model_value.startswith("glm-"):
         return ModelProvider.ZAI
+    elif model_value.startswith("deepseek-"):
+        return ModelProvider.DEEPSEEK
     raise ValueError(f"Unknown provider for: {model_value}")
 
 

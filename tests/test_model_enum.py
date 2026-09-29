@@ -97,6 +97,9 @@ class TestModelEnum(unittest.TestCase):
             "glm_5": "glm-5",
             "glm_4_7": "glm-4.7",
             "glm_4_7_flash": "glm-4.7-flash",
+            # DeepSeek models
+            "deepseek_flash": "deepseek-flash",
+            "deepseek_v4_pro": "deepseek-v4-pro",
             # Gemini 2.5 models
             "gemini_2_5_pro": "gemini-2.5-pro",
             "gemini_2_5_flash": "gemini-2.5-flash",
@@ -147,7 +150,7 @@ class TestModelEnum(unittest.TestCase):
     def test_model_enum_membership(self):
         """Test enum membership and iteration."""
         all_models = list(Model)
-        self.assertEqual(len(all_models), 59)
+        self.assertEqual(len(all_models), 61)
 
         expected_values = [
             "gpt-5.4",
@@ -315,7 +318,8 @@ class TestModelEnum(unittest.TestCase):
         self.assertEqual(ModelProvider.ZAI.value, "zai")
 
         all_providers = list(ModelProvider)
-        self.assertEqual(len(all_providers), 5)
+        self.assertEqual(ModelProvider.DEEPSEEK.value, "deepseek")
+        self.assertEqual(len(all_providers), 6)
 
     def test_get_provider_function(self):
         """Test get_provider() returns correct provider for each model."""
@@ -342,6 +346,9 @@ class TestModelEnum(unittest.TestCase):
 
         # Z.ai models
         self.assertEqual(get_provider(Model.glm_5_3), ModelProvider.ZAI)
+
+        # DeepSeek models
+        self.assertEqual(get_provider(Model.deepseek_v4_pro), ModelProvider.DEEPSEEK)
 
 
 if __name__ == "__main__":
