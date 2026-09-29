@@ -17,7 +17,24 @@ class Model(str, Enum):
     gpt_5_6_terra = "gpt-5.6-terra"
     gpt_5_6_sol = "gpt-5.6-sol"
 
-    # ===== Google Gemini Models (stable) =====
+    # ===== OpenAI Models (GPT-6 series, current flagship) =====
+    # luna $0.1/$0.5, sol $2/$10, astra $10/$50 per MTok. There is no gpt-6-terra, so
+    # openai:terra-latest keeps resolving to gpt-5.6-terra. Built on the Responses API
+    # (agents/openai_responses.py): on Chat Completions GPT-6 calls tools only with
+    # reasoning off.
+    gpt_6_luna = "gpt-6-luna"
+    gpt_6_sol = "gpt-6-sol"
+    gpt_6_astra = "gpt-6-astra"
+
+    # ===== Google Gemini Models (stable, 3.x) =====
+    gemini_3_8_flash = "gemini-3.8-flash"
+    gemini_3_7_flash = "gemini-3.7-flash"
+    gemini_3_6_flash = "gemini-3.6-flash"
+    gemini_3_5_flash = "gemini-3.5-flash"
+    gemini_3_5_flash_lite = "gemini-3.5-flash-lite"
+    gemini_3_1_flash_lite = "gemini-3.1-flash-lite"
+
+    # ===== Google Gemini Models (2.5; Google now serves these to existing users only) =====
     gemini_2_5_pro = "gemini-2.5-pro"
     gemini_2_5_flash = "gemini-2.5-flash"
     gemini_2_5_flash_lite = "gemini-2.5-flash-lite"
@@ -62,6 +79,26 @@ class Model(str, Enum):
     claude_sonnet_4_6 = "claude-sonnet-4-6"
     claude_sonnet_4_5 = "claude-sonnet-4-5"
 
+    # ===== xAI Grok Models =====
+    grok_4_7 = "grok-4.7"
+    grok_4_6 = "grok-4.6"
+    grok_4_5 = "grok-4.5"
+    grok_4_3 = "grok-4.3"
+    grok_4_20_reasoning = "grok-4.20-0309-reasoning"
+    grok_4_20_non_reasoning = "grok-4.20-0309-non-reasoning"
+
+    # ===== Z.ai GLM Models =====
+    # Served through Z.ai's OpenAI-compatible endpoint (agno has no Z.ai class). No
+    # latest-of-a-tier alias: Z.ai documents no model-listing endpoint to resolve one.
+    glm_5_3 = "glm-5.3"
+    glm_5_3_flashx = "glm-5.3-flashx"
+    glm_5_3_flash = "glm-5.3-flash"
+    glm_5_2 = "glm-5.2"
+    glm_5_1 = "glm-5.1"
+    glm_5 = "glm-5"
+    glm_4_7 = "glm-4.7"
+    glm_4_7_flash = "glm-4.7-flash"
+
     # ===== Latest of a tier (resolved per vendor, see agents/model_resolver.py) =====
     # Follow the vendor's newest model in a tier without a code change, never jumping
     # to a pricier tier. Prefer these over the pinned ids above for defaults.
@@ -71,14 +108,19 @@ class Model(str, Enum):
     openai_luna_latest = "openai:luna-latest"
     openai_terra_latest = "openai:terra-latest"
     openai_sol_latest = "openai:sol-latest"
+    openai_astra_latest = "openai:astra-latest"
+    google_flash_lite_latest = "google:flash-lite-latest"
     google_flash_latest = "google:flash-latest"
     google_pro_latest = "google:pro-latest"
+    xai_grok_latest = "xai:grok-latest"
 
 
 class ModelProvider(str, Enum):
     OPENAI = "openai"
     GEMINI = "gemini"
     ANTHROPIC = "anthropic"
+    XAI = "xai"
+    ZAI = "zai"
 
 
 def get_provider(model: Union[Model, str]) -> ModelProvider:
@@ -90,6 +132,10 @@ def get_provider(model: Union[Model, str]) -> ModelProvider:
         return ModelProvider.GEMINI
     elif model_value.startswith(("claude-", "anthropic:")):
         return ModelProvider.ANTHROPIC
+    elif model_value.startswith(("grok-", "xai:")):
+        return ModelProvider.XAI
+    elif model_value.startswith("glm-"):
+        return ModelProvider.ZAI
     raise ValueError(f"Unknown provider for: {model_value}")
 
 

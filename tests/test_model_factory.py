@@ -26,22 +26,60 @@ class TestCreateModel(unittest.TestCase):
         self.assertNotIn("max_tokens", call_kwargs)
         self.assertEqual(call_kwargs["max_output_tokens"], 1000)
 
-    @patch("agents.model_factory.OpenAIChat")
-    def test_create_openai_model(self, mock_openai_class):
-        mock_openai_class.return_value = MagicMock()
-        result = create_model(Model.gpt_5_4, openai_api_key="test-key")
+    def test_create_openai_model_uses_the_responses_api(self):
+        """Real class, no mock: GPT-6 calls tools on Chat Completions only with reasoning
+        off, so a factory that drifted back to OpenAIChat must fail here."""
+        from agno.models.openai import OpenAIChat
 
-        mock_openai_class.assert_called_once_with(id="gpt-5.4", api_key="test-key")
-        self.assertEqual(result, mock_openai_class.return_value)
+        from agents.openai_responses import ReasoningAwareOpenAIResponses
 
-    @patch("agents.model_factory.OpenAIChat")
-    def test_create_openai_with_max_tokens(self, mock_openai_class):
-        mock_openai_class.return_value = MagicMock()
-        create_model(Model.gpt_5_4_mini, openai_api_key="test-key", max_tokens=2000)
+        result = create_model(Model.gpt_6_sol, openai_api_key="test-key")
 
-        call_kwargs = mock_openai_class.call_args[1]
-        self.assertIn("max_tokens", call_kwargs)
-        self.assertEqual(call_kwargs["max_tokens"], 2000)
+        self.assertIsInstance(result, ReasoningAwareOpenAIResponses)
+        self.assertNotIsInstance(result, OpenAIChat)
+        self.assertEqual(result.id, "gpt-6-sol")
+
+    def test_create_openai_with_max_tokens_uses_max_output_tokens(self):
+        result = create_model(Model.gpt_5_4_mini, openai_api_key="test-key", max_tokens=2000)
+        self.assertEqual(result.max_output_tokens, 2000)
+
+    def test_gpt6_is_treated_as_a_reasoning_model(self):
+        """agno 3.0.11 recognises only gpt-5/o3/o4-mini; without this a GPT-6 tool
+        round-trip goes back without the reasoning item that produced the call."""
+        for model in [Model.gpt_6_luna, Model.gpt_6_sol, Model.gpt_6_astra, Model.gpt_5_6_terra]:
+            with self.subTest(model=model):
+                self.assertTrue(create_model(model, openai_api_key="k")._using_reasoning_model())
+
+    def test_create_xai_model(self):
+        from agno.models.xai import xAI
+
+        result = create_model(Model.grok_4_7, xai_api_key="test-key", max_tokens=321)
+
+        self.assertIsInstance(result, xAI)
+        self.assertEqual(result.id, "grok-4.7")
+        self.assertEqual(result.base_url, "https://api.x.ai/v1")
+        self.assertEqual(result.max_tokens, 321)
+
+    def test_create_zai_model_points_at_zais_openai_compatible_endpoint(self):
+        from agno.models.openai.like import OpenAILike
+
+        result = create_model(Model.glm_5_3, zai_api_key="test-key", max_tokens=321)
+
+        self.assertIsInstance(result, OpenAILike)
+        self.assertEqual(result.id, "glm-5.3")
+        self.assertEqual(result.base_url, "https://api.z.ai/api/paas/v4/")
+        self.assertEqual(result.api_key, "test-key")
+        self.assertEqual(result.max_tokens, 321)
+
+    def test_missing_zai_api_key_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            create_model(Model.glm_5_3)
+        self.assertIn("Z.ai", str(ctx.exception))
+
+    def test_missing_xai_api_key_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            create_model(Model.grok_4_7)
+        self.assertIn("xAI", str(ctx.exception))
 
     def test_create_anthropic_model(self):
         """Claude ids get the refusal-aware subclass, not agno's bare Claude.
@@ -101,10 +139,11 @@ class TestCreateModel(unittest.TestCase):
         with self.assertRaises(ValueError):
             create_model("nonexistent-model", gemini_api_key="test-key")
 
-    @patch("agents.model_factory.OpenAIChat")
-    def test_all_openai_models_create_openai_chat(self, mock_openai_class):
+    @patch("agents.model_factory.ReasoningAwareOpenAIResponses")
+    def test_all_openai_models_create_openai_responses(self, mock_openai_class):
         mock_openai_class.return_value = MagicMock()
-        for model in [Model.gpt_5_4, Model.gpt_5_4_mini, Model.gpt_5_4_nano]:
+        openai_models = [m for m in Model.__members__.values() if m.value.startswith("gpt-")]
+        for model in openai_models:
             with self.subTest(model=model):
                 mock_openai_class.reset_mock()
                 create_model(model, openai_api_key="test-key")
@@ -113,13 +152,7 @@ class TestCreateModel(unittest.TestCase):
     @patch("agents.model_factory.Gemini")
     def test_all_gemini_models_create_gemini(self, mock_gemini_class):
         mock_gemini_class.return_value = MagicMock()
-        gemini_models = [
-            Model.gemini_2_5_pro,
-            Model.gemini_2_5_flash,
-            Model.gemini_2_5_flash_lite,
-            Model.gemini_3_1_pro,
-            Model.gemini_3_flash,
-        ]
+        gemini_models = [m for m in Model.__members__.values() if m.value.startswith("gemini-")]
         for model in gemini_models:
             with self.subTest(model=model):
                 mock_gemini_class.reset_mock()

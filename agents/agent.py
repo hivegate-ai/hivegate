@@ -286,6 +286,8 @@ def get_agent(
                 gemini_api_key=api_settings.gemini_api_key,
                 openai_api_key=api_settings.openai_api_key,
                 anthropic_api_key=api_settings.anthropic_api_key,
+                xai_api_key=api_settings.xai_api_key,
+                zai_api_key=api_settings.zai_api_key,
             ),
             db=db_instance,
             delete_memories=True,
@@ -464,6 +466,8 @@ def get_agent(
         gemini_api_key=api_settings.gemini_api_key,
         openai_api_key=api_settings.openai_api_key,
         anthropic_api_key=api_settings.anthropic_api_key,
+        xai_api_key=api_settings.xai_api_key,
+        zai_api_key=api_settings.zai_api_key,
     )
 
     # agno 3 removed the manual chain-of-thought step behind `reasoning=True` (the step
