@@ -29,6 +29,10 @@ STORED = [
 ]
 
 
+def _has_manual_reasoning():
+    return importlib.util.find_spec("agno.reasoning.default") is not None
+
+
 class SplitMessagesTest(unittest.TestCase):
     def test_separates_system_history_and_current(self):
         system, history, current, dropped = replay.split_messages(STORED)
@@ -61,7 +65,19 @@ class BuildRequestsTest(unittest.TestCase):
         self.assertEqual([self.current], built["main_no_history"]["messages"])
         self.assertEqual("SYSTEM", built["main_full"]["system"])
 
+    def test_reasoning_variant_is_skipped_where_agno_has_no_manual_step(self):
+        # agno 3 removed the manual chain-of-thought step; the variant must say so
+        # rather than crash the whole replay.
+        if _has_manual_reasoning():
+            self.skipTest("this agno still has the manual step")
+        [(variant, request, note)] = replay.build_requests(
+            ["reasoning_cot"], self.system, self.history, self.current, "claude-sonnet-5-5"
+        )
+        self.assertIn("removed in agno 3", request["skipped"])
+
     def test_reasoning_variant_is_built_the_way_agno_builds_it(self):
+        if not _has_manual_reasoning():
+            self.skipTest("agno 3 has no manual chain-of-thought step to build")
         [(variant, request, note)] = replay.build_requests(
             ["reasoning_cot"], self.system, self.history, self.current, "claude-sonnet-5-5"
         )
@@ -170,7 +186,10 @@ class EndToEndTest(unittest.TestCase):
         ):
             replay.main(["--from-json", f.name, "--dry-run"])
         lines = [json.loads(line) for line in out.getvalue().splitlines()]
-        self.assertEqual(3, len([line for line in lines if "dry_run" in line]))
+        built = len([line for line in lines if "dry_run" in line])
+        skipped = len([line for line in lines if "skipped" in line])
+        self.assertEqual(3, built + skipped)
+        self.assertEqual(2 if not _has_manual_reasoning() else 3, built)
 
 
 if __name__ == "__main__":

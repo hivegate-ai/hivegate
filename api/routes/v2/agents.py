@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
+from agents.hitl import requirements_for
 from agents.agent import build_mcp_toolkits, ensure_mcp_ready
 from agents.agent import get_agent as get_agent_impl
 from agents.agent import slug_to_table_name
@@ -669,9 +670,10 @@ async def commit_response_streamer_v2(
     """
     logging.debug(f"Starting v2 streaming commit response for run_id: {body.run_id}")
 
+    # agno 3 resumes from `requirements` and ignores `updated_tools` - see agents/hitl.py.
     run_response = agent.acontinue_run(
         run_id=body.run_id,
-        updated_tools=cached_run.tools,
+        requirements=requirements_for(cached_run, cached_run.tools),
         stream=True,
     )  # type: ignore[misc]
     chunk_count = 0
@@ -1432,7 +1434,9 @@ async def commit_agent_chat_v2(agent_id: str, body: CommitRequest, db: Session =
                 media_type="text/event-stream",
             )
         else:
-            response = await agent.acontinue_run(run_id=body.run_id, updated_tools=cached_run.tools, stream=False)
+            response = await agent.acontinue_run(
+                run_id=body.run_id, requirements=requirements_for(cached_run, cached_run.tools), stream=False
+            )
             logging.debug(f"Completed commit request for agent: {agent_id}")
 
             # Extract token usage metrics

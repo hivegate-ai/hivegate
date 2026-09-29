@@ -1,7 +1,8 @@
 import json
 import re
 import time
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime
 from typing import Callable, List, Optional
 
 from agno.agent import Agent
@@ -205,7 +206,8 @@ def build_mcp_toolkits(config: Optional[AgentConfig]) -> list:
             headers=(server.headers or None),
             # Explicit, cold-start-tolerant connect/request timeout (agno defaults to 30s);
             # the target MCP server may be scale-to-zero and need a moment to wake.
-            timeout=timedelta(seconds=60),
+            # Seconds as a float: mcp 2 dropped the timedelta form mcp 1 accepted.
+            timeout=60.0,
         )
         toolkits.append(MCPTools(server_params=params, transport="streamable-http"))
     return toolkits
@@ -457,6 +459,30 @@ def get_agent(
     # Load skills from database if provided
     skills = Skills(loaders=[DbSkillLoader(db_skills)]) if db_skills else None
 
+    model = create_model(
+        model=model_id,
+        gemini_api_key=api_settings.gemini_api_key,
+        openai_api_key=api_settings.openai_api_key,
+        anthropic_api_key=api_settings.anthropic_api_key,
+    )
+
+    # agno 3 removed the manual chain-of-thought step behind `reasoning=True` (the step
+    # Claude Sonnet 5.5 refused as reasoning_extraction). It reasons only natively, when
+    # `reasoning_model` is set - and with a model that cannot think it emits a reasoning
+    # *error event* on every run instead, which a caller reading the stream as text would
+    # take for part of the answer. So enable_reasoning turns reasoning on only for a model
+    # configured to think, and says so otherwise.
+    reasoning_model = None
+    if config.enable_reasoning:
+        if getattr(model, "thinking", None):
+            reasoning_model = model
+        else:
+            logging.warning(
+                "Agent %s has enable_reasoning but its model has no thinking configured; "
+                "agno 3 only reasons natively, so reasoning is off for it",
+                agent_slug_id,
+            )
+
     return Agent(
         add_datetime_to_context=True,
         add_history_to_context=config.enable_history,
@@ -469,19 +495,12 @@ def get_agent(
         knowledge=get_knowledge_service().get_dynamic_kb(),
         markdown=True,
         memory_manager=memory_manager,
-        model=create_model(
-            model=model_id,
-            gemini_api_key=api_settings.gemini_api_key,
-            openai_api_key=api_settings.openai_api_key,
-            anthropic_api_key=api_settings.anthropic_api_key,
-        ),
+        model=model,
         name=agent_name,
         num_history_runs=config.num_history_runs,
         pre_hooks=pre_hooks,
         read_chat_history=config.enable_history,
-        reasoning=config.enable_reasoning,
-        reasoning_min_steps=config.reasoning_min_steps,
-        reasoning_max_steps=config.reasoning_max_steps,
+        reasoning_model=reasoning_model,
         search_knowledge=True,
         skills=skills,
         session_id=session_id,

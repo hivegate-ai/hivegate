@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from agno.agent import Agent
+from agents.hitl import requirements_for
 from agno.db.sqlite import SqliteDb
 from agno.run.agent import RunOutput, RunOutputEvent
 from agno.tools.user_control_flow import UserControlFlowTools
@@ -459,7 +460,6 @@ def build_agent(
         update_memory_on_run=True,
         store_history_messages=True,
         markdown=True,
-        reasoning=False,
         debug_mode=False,
         stream_events=True,
         pre_hooks=[toolkit_selector_hook],
@@ -771,7 +771,9 @@ async def _stream_agent_events(agent: Agent, message: str):
 async def _stream_continue_run(agent: Agent, run_id: str, updated_tools: Optional[List[Dict[str, Any]]]):
     try:
         if updated_tools is not None:
-            r_stream = agent.continue_run(run_id=run_id, updated_tools=updated_tools, stream=True)  # type: ignore[call-overload]
+            r_stream = agent.continue_run(
+                run_id=run_id, requirements=requirements_for(None, updated_tools), stream=True
+            )  # type: ignore[call-overload]
         else:
             r_stream = agent.continue_run(run_id=run_id, stream=True)
         for ev in r_stream:
@@ -960,7 +962,9 @@ def chat_commit(req: CommitRequest):
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
             )
         else:
-            out = agent.continue_run(run_id=req.run_id, updated_tools=cached_run.tools, stream=False)
+            out = agent.continue_run(
+                run_id=req.run_id, requirements=requirements_for(cached_run, cached_run.tools), stream=False
+            )
 
             # Cache the new run output (in case there are more paused tools)
             if hasattr(out, "run_id") and out.run_id:
