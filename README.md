@@ -7,6 +7,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![GitHub stars](https://img.shields.io/github/stars/hivegate-ai/hivegate?style=social)](https://github.com/hivegate-ai/hivegate/stargazers)
+[![CI](https://github.com/hivegate-ai/hivegate/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hivegate-ai/hivegate/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/releases/latest)
+[![Last commit](https://img.shields.io/github/last-commit/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/commits/main)
+[![Discussions](https://img.shields.io/github/discussions/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/discussions)
 
 HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/agno-agi/agno). You write the agent, and HiveGate gives it what production needs:
 - per-user sessions
@@ -16,7 +20,7 @@ HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/
 - versioned prompts
 - tracing
 
-**[Website](https://hivegate.dev)** · **[Docs](https://hivegate.dev/docs/)** · **[Deploy guide](https://hivegate.dev/deploy/)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)**
+**[Website](https://hivegate.dev)** · **[Docs](https://hivegate.dev/docs/)** · **[Deploy guide](https://hivegate.dev/deploy/)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)** · **[Roadmap](https://github.com/hivegate-ai/hivegate/issues/72)**
 
 ```sh
 git clone https://github.com/hivegate-ai/hivegate && cd hivegate
