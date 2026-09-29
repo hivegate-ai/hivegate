@@ -1,10 +1,34 @@
 from typing import Any, Optional, Union
 
-from agno.models.google import Gemini
-from agno.models.openai import OpenAIChat
-
 from agents import Model, ModelProvider, get_provider
 from agents.model_resolver import resolve_model_id
+from agents.openai_responses import ReasoningAwareOpenAIResponses
+from agents.provider_models import GuardedDeepSeek, GuardedGemini, GuardedOpenAILike, GuardedXAI
+
+
+class ProviderNotConfiguredError(ValueError):
+    """The requested model's provider has no API key on this deployment.
+
+    A ValueError, as before, so existing callers still catch it; the chat routes map
+    it to 503 with this message instead of a generic 500 that hides which key is
+    missing.
+    """
+
+
+# agno retries a provider error only when told to, and leaves `retries` at 0. So a
+# transient 429/5xx - Gemini answering 503 "model is currently experiencing high demand",
+# as five Gemini 3.x models did in one integration run on 2026-09-29 - reached the
+# caller as the reply itself: HTTP 200 whose content is the provider's error JSON. agno
+# never retries 400/401/403/404/413/422 or a context-window error, so a bad key, an
+# unknown model or a Claude refusal (422, agents/claude_refusal.py) still fails at once.
+# Backoff 2s then 4s: short enough to stay inside a caller's own timeout. The classes
+# built here make that safe (agents/provider_models.py): a stream is retried only before
+# its first chunk, and a billing error is never retried.
+PROVIDER_RETRY: dict[str, Any] = {"retries": 2, "delay_between_retries": 2, "exponential_backoff": True}
+
+
+# Z.ai's OpenAI-compatible endpoint (docs.z.ai, "OpenAI Python SDK").
+ZAI_BASE_URL = "https://api.z.ai/api/paas/v4/"
 
 
 def create_model(
@@ -13,6 +37,9 @@ def create_model(
     openai_api_key: Optional[str] = None,
     gemini_api_key: Optional[str] = None,
     anthropic_api_key: Optional[str] = None,
+    xai_api_key: Optional[str] = None,
+    zai_api_key: Optional[str] = None,
+    deepseek_api_key: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
 ) -> Any:
@@ -26,11 +53,14 @@ def create_model(
         openai_api_key: OpenAI API key (required for OpenAI models)
         gemini_api_key: Gemini API key (required for Gemini models)
         anthropic_api_key: Anthropic API key (required for Claude models)
+        xai_api_key: xAI API key (required for Grok models)
+        zai_api_key: Z.ai API key (required for GLM models)
+        deepseek_api_key: DeepSeek API key (required for DeepSeek models)
         temperature: Optional temperature setting
         max_tokens: Optional max tokens setting
 
     Returns:
-        Configured Agno model instance (OpenAIChat, Gemini, or Claude)
+        Configured Agno model instance (OpenAI Responses, Gemini, Claude, xAI, Z.ai or DeepSeek)
 
     Raises:
         ValueError: If the provider is unknown or required API key is missing
@@ -41,19 +71,26 @@ def create_model(
 
     if provider == ModelProvider.OPENAI:
         if not openai_api_key:
-            raise ValueError("OpenAI API key is required for OpenAI models")
+            raise ProviderNotConfiguredError("OpenAI API key is required for OpenAI models")
 
+        # Responses API, not Chat Completions: GPT-6 calls tools on Chat Completions
+        # only with reasoning off. See agents/openai_responses.py.
         kwargs: dict[str, Any] = {"id": model_id, "api_key": openai_api_key}
         if temperature is not None:
             kwargs["temperature"] = temperature
         if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
+            kwargs["max_output_tokens"] = max_tokens  # the Responses API's name for it
+        # Chat Completions stored nothing by default; agno's Responses class would set
+        # store=True for every reasoning model and chain turns through OpenAI-held state.
+        # store=False keeps conversations off OpenAI's servers, as before: agno then
+        # replays the encrypted reasoning items itself.
+        kwargs["store"] = False
 
-        return OpenAIChat(**kwargs)
+        return ReasoningAwareOpenAIResponses(**kwargs, **PROVIDER_RETRY)
 
     elif provider == ModelProvider.GEMINI:
         if not gemini_api_key:
-            raise ValueError("Gemini API key is required for Gemini models")
+            raise ProviderNotConfiguredError("Gemini API key is required for Gemini models")
 
         kwargs = {"id": model_id, "api_key": gemini_api_key}
         if temperature is not None:
@@ -61,7 +98,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens  # Gemini uses different param name
 
-        return Gemini(**kwargs)
+        return GuardedGemini(**kwargs, **PROVIDER_RETRY)
 
     elif provider == ModelProvider.ANTHROPIC:
         # Lazy import to handle missing anthropic package gracefully. The refusal-aware
@@ -73,7 +110,7 @@ def create_model(
             raise ImportError("anthropic package is not installed. Install it with: pip install anthropic") from e
 
         if not anthropic_api_key:
-            raise ValueError("Anthropic API key is required for Claude models")
+            raise ProviderNotConfiguredError("Anthropic API key is required for Claude models")
 
         kwargs = {"id": model_id, "api_key": anthropic_api_key}
         if temperature is not None:
@@ -81,7 +118,51 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
-        return RefusalAwareClaude(**kwargs)
+        return RefusalAwareClaude(**kwargs, **PROVIDER_RETRY)
+
+    elif provider == ModelProvider.XAI:
+        if not xai_api_key:
+            raise ProviderNotConfiguredError("xAI API key is required for Grok models")
+
+        # agno's xAI speaks xAI's OpenAI-compatible Chat Completions endpoint.
+        # (agno's xAIResponses adds SuperGrok OAuth, which the gateway doesn't use.)
+        kwargs = {"id": model_id, "api_key": xai_api_key}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+
+        return GuardedXAI(**kwargs, **PROVIDER_RETRY)
+
+    elif provider == ModelProvider.ZAI:
+        if not zai_api_key:
+            raise ProviderNotConfiguredError("Z.ai API key is required for GLM models")
+
+        kwargs = {
+            "id": model_id,
+            "api_key": zai_api_key,
+            "base_url": ZAI_BASE_URL,
+            "name": "Zai",
+            "provider": "Z.ai",
+        }
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+
+        return GuardedOpenAILike(**kwargs, **PROVIDER_RETRY)
+
+    elif provider == ModelProvider.DEEPSEEK:
+        if not deepseek_api_key:
+            raise ProviderNotConfiguredError("DeepSeek API key is required for DeepSeek models")
+
+        kwargs = {"id": model_id, "api_key": deepseek_api_key}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+
+        return GuardedDeepSeek(**kwargs, **PROVIDER_RETRY)
 
     else:
         raise ValueError(f"Unknown model provider: {provider}")

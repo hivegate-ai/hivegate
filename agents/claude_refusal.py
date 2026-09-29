@@ -21,6 +21,8 @@ from typing import Any, NoReturn, Optional, Tuple
 
 from agno.exceptions import ModelProviderError
 from agno.models.anthropic import Claude
+
+from agents.provider_models import StreamRestartGuard
 from agno.utils.log import log_error
 
 # Stable, greppable text for callers that classify the error from the stream body
@@ -64,7 +66,7 @@ def refusal_of(message: Any) -> Optional[Tuple[Optional[str], Optional[str]]]:
     return getattr(details, "category", None), getattr(details, "explanation", None)
 
 
-class RefusalAwareClaude(Claude):
+class RefusalAwareClaude(StreamRestartGuard, Claude):
     """agno's Claude, except a refusal raises instead of returning empty content."""
 
     def _raise_if_refused(self, message: Any) -> None:

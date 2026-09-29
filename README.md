@@ -64,6 +64,9 @@ Set at least one model provider API key, then chat:
 export GOOGLE_API_KEY="your-google-api-key"       # Gemini (default)
 # export OPENAI_API_KEY="your-openai-api-key"     # OpenAI (GPT)
 # export ANTHROPIC_API_KEY="your-anthropic-api-key"  # Anthropic (Claude)
+# export XAI_API_KEY="your-xai-api-key"              # xAI (Grok)
+# export ZAI_API_KEY="your-zai-api-key"              # Z.ai (GLM)
+# export DEEPSEEK_API_KEY="your-deepseek-api-key"    # DeepSeek
 
 curl -X POST http://localhost:8000/v2/agents/demo-assistant/chat \
   -H "Content-Type: application/json" \
@@ -87,8 +90,14 @@ newest model in that tier without a code change, and never moves to a pricier ti
 | Vendor | Aliases |
 |---|---|
 | Anthropic | `anthropic:haiku-latest`, `anthropic:sonnet-latest`, `anthropic:opus-latest` |
-| OpenAI | `openai:luna-latest`, `openai:terra-latest`, `openai:sol-latest` |
-| Google | `google:flash-latest`, `google:pro-latest` |
+| OpenAI | `openai:luna-latest`, `openai:terra-latest`, `openai:sol-latest`, `openai:astra-latest` |
+| Google | `google:flash-lite-latest`, `google:flash-latest`, `google:pro-latest` |
+| xAI | `xai:grok-latest` |
+
+Z.ai GLM models (`glm-5.3`, `glm-5.3-flashx`, `glm-5.3-flash`, `glm-5.2`) are pinned ids only - Z.ai
+documents no model-listing endpoint to resolve an alias against. DeepSeek has two:
+`deepseek-flash` (itself a moving name, now V4.1-Flash) and `deepseek-v4-pro`. OpenAI models run
+on the Responses API: GPT-6 calls tools on Chat Completions only with reasoning off.
 
 The gateway resolves an alias by listing the vendor's models through its SDK and
 taking the newest one in the tier (`agents/model_resolver.py`), caches the answer
@@ -240,6 +249,9 @@ Platform-specific deployment manifests and guides live under `deploy/`:
 | `GOOGLE_API_KEY` | * | Google/Gemini API key |
 | `OPENAI_API_KEY` | * | OpenAI API key |
 | `ANTHROPIC_API_KEY` | * | Anthropic API key |
+| `XAI_API_KEY` | * | xAI API key (Grok models) |
+| `ZAI_API_KEY` | * | Z.ai API key (GLM models) |
+| `DEEPSEEK_API_KEY` | * | DeepSeek API key |
 | `QDRANT_URL` | No | Qdrant vector database URL |
 | `SECRET_TOKEN_ENC_KEY` | No | Token encryption key (auto-generated) |
 

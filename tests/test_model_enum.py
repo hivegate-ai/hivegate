@@ -71,7 +71,32 @@ class TestModelEnum(unittest.TestCase):
             "gpt_5_6_luna": "gpt-5.6-luna",
             "gpt_5_6_terra": "gpt-5.6-terra",
             "gpt_5_6_sol": "gpt-5.6-sol",
-            # Gemini stable models
+            "gpt_6_luna": "gpt-6-luna",
+            "gpt_6_sol": "gpt-6-sol",
+            "gpt_6_astra": "gpt-6-astra",
+            # Gemini 3.x stable models
+            "gemini_3_8_flash": "gemini-3.8-flash",
+            "gemini_3_7_flash": "gemini-3.7-flash",
+            "gemini_3_6_flash": "gemini-3.6-flash",
+            "gemini_3_5_flash": "gemini-3.5-flash",
+            "gemini_3_5_flash_lite": "gemini-3.5-flash-lite",
+            "gemini_3_1_flash_lite": "gemini-3.1-flash-lite",
+            # xAI models
+            "grok_4_7": "grok-4.7",
+            "grok_4_6": "grok-4.6",
+            "grok_4_5": "grok-4.5",
+            "grok_4_3": "grok-4.3",
+            "grok_4_20_reasoning": "grok-4.20-0309-reasoning",
+            "grok_4_20_non_reasoning": "grok-4.20-0309-non-reasoning",
+            # Z.ai models
+            "glm_5_3": "glm-5.3",
+            "glm_5_3_flashx": "glm-5.3-flashx",
+            "glm_5_3_flash": "glm-5.3-flash",
+            "glm_5_2": "glm-5.2",
+            # DeepSeek models
+            "deepseek_flash": "deepseek-flash",
+            "deepseek_v4_pro": "deepseek-v4-pro",
+            # Gemini 2.5 models
             "gemini_2_5_pro": "gemini-2.5-pro",
             "gemini_2_5_flash": "gemini-2.5-flash",
             "gemini_2_5_flash_lite": "gemini-2.5-flash-lite",
@@ -121,7 +146,7 @@ class TestModelEnum(unittest.TestCase):
     def test_model_enum_membership(self):
         """Test enum membership and iteration."""
         all_models = list(Model)
-        self.assertEqual(len(all_models), 33)
+        self.assertEqual(len(all_models), 57)
 
         expected_values = [
             "gpt-5.4",
@@ -144,6 +169,9 @@ class TestModelEnum(unittest.TestCase):
             "openai:sol-latest",
             "google:flash-latest",
             "google:pro-latest",
+            "openai:astra-latest",
+            "google:flash-lite-latest",
+            "xai:grok-latest",
         ]
 
         enum_values = [model.value for model in Model]
@@ -282,9 +310,12 @@ class TestModelEnum(unittest.TestCase):
         self.assertEqual(ModelProvider.OPENAI.value, "openai")
         self.assertEqual(ModelProvider.GEMINI.value, "gemini")
         self.assertEqual(ModelProvider.ANTHROPIC.value, "anthropic")
+        self.assertEqual(ModelProvider.XAI.value, "xai")
+        self.assertEqual(ModelProvider.ZAI.value, "zai")
 
         all_providers = list(ModelProvider)
-        self.assertEqual(len(all_providers), 3)
+        self.assertEqual(ModelProvider.DEEPSEEK.value, "deepseek")
+        self.assertEqual(len(all_providers), 6)
 
     def test_get_provider_function(self):
         """Test get_provider() returns correct provider for each model."""
@@ -304,6 +335,16 @@ class TestModelEnum(unittest.TestCase):
         self.assertEqual(get_provider(Model.claude_opus_4_6), ModelProvider.ANTHROPIC)
         self.assertEqual(get_provider(Model.claude_sonnet_4_6), ModelProvider.ANTHROPIC)
         self.assertEqual(get_provider(Model.claude_haiku_4_5), ModelProvider.ANTHROPIC)
+
+        # xAI models
+        self.assertEqual(get_provider(Model.grok_4_7), ModelProvider.XAI)
+        self.assertEqual(get_provider(Model.grok_4_20_reasoning), ModelProvider.XAI)
+
+        # Z.ai models
+        self.assertEqual(get_provider(Model.glm_5_3), ModelProvider.ZAI)
+
+        # DeepSeek models
+        self.assertEqual(get_provider(Model.deepseek_v4_pro), ModelProvider.DEEPSEEK)
 
 
 if __name__ == "__main__":

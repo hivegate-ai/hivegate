@@ -27,6 +27,7 @@ from agents.hitl import requirements_for
 from agents.agent import build_mcp_toolkits, ensure_mcp_ready
 from agents.agent import get_agent as get_agent_impl
 from agents.agent import slug_to_table_name
+from agents.model_factory import ProviderNotConfiguredError
 from agents.model_resolver import resolve_model_id
 from agents.v2_selector import _get_prompt_from_local_storage
 from api.services.access_token import fetch_access_token, has_access_tokens_batch  # noqa: F401
@@ -1161,6 +1162,10 @@ async def chat_with_agent_v2(agent_id: str, body: ChatRequest, db: Session = Dep
     except HTTPException:
         # Re-raise HTTP exceptions to maintain proper error responses
         raise
+    except ProviderNotConfiguredError as e:
+        # The model is valid but this deployment has no key for its provider -
+        # say which, rather than a 500 that reads like a gateway bug.
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except Exception as e:
         logging.exception(f"Unexpected error in chat_with_agent_v2 for agent {agent_id}: {str(e)}")
         raise HTTPException(
@@ -1470,6 +1475,10 @@ async def commit_agent_chat_v2(agent_id: str, body: CommitRequest, db: Session =
 
     except HTTPException:
         raise
+    except ProviderNotConfiguredError as e:
+        # The model is valid but this deployment has no key for its provider -
+        # say which, rather than a 500 that reads like a gateway bug.
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except Exception as e:
         logging.exception(f"Unexpected error in commit_agent_chat_v2 for agent {agent_id}: {str(e)}")
         raise HTTPException(
