@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [{ name = "Agno", email = "hello@agno.com" }]
 
 dependencies = [
-  "agno>=3.0.11",
+  "agno[mcp]>=3.0.11",
   "fastapi[standard]",
   "google-genai>=1.72.0",
   "google-cloud-storage",
