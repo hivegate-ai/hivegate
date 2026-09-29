@@ -480,7 +480,7 @@ response = agent.run("Schedule a meeting tomorrow at 2pm")
 
 ## References
 
-- **Agno Framework**: https://github.com/agno-ai/agno
+- **Agno Framework**: https://github.com/agno-agi/agno
 - **Rich Library**: https://rich.readthedocs.io/
 - **InquirerPy**: https://inquirerpy.readthedocs.io/
 - **Tool Confirmation Documentation**: See `../TOOL_CONFIRMATION_RICH_DIALOGS.md`

@@ -4,12 +4,13 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![GitHub stars](https://img.shields.io/github/stars/hivegate-ai/hivegate?style=social)](https://github.com/hivegate-ai/hivegate/stargazers)
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template?template=https://github.com/hivegate-ai/deploy)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/hivegate-ai/deploy)
 [![Deploy to Koyeb](https://img.shields.io/badge/Deploy%20to-Koyeb-121212?style=for-the-badge&logo=koyeb&logoColor=white)](https://app.koyeb.com/deploy?type=git&repository=github.com/hivegate-ai/deploy)
 
-A production-ready API gateway for serving AI agents. Built with FastAPI and [Agno 2.5.16+](https://github.com/agno-ai/agno).
+A production-ready API gateway for serving AI agents. Built with FastAPI and [Agno 3](https://github.com/agno-agi/agno).
 
 ## Features
 
