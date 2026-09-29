@@ -30,8 +30,7 @@ def get_prompt_storage(db: "Session | None" = None) -> PromptStorageBackend:
             return LangSmithStorage()
         except ImportError as e:
             raise ImportError(
-                "LangSmith storage requires additional dependencies. "
-                "Install with: pip install hivegate[langsmith]"
+                "LangSmith storage requires additional dependencies. Install with: pip install hivegate[langsmith]"
             ) from e
 
     if backend == "service":
