@@ -1,7 +1,7 @@
 # Koyeb service definition
 # https://www.koyeb.com/docs/deploy/koyeb-yaml
 
-name: agents-gateway
+name: hivegate
 type: web
 
 docker:
@@ -68,7 +68,7 @@ env:
     secret: service-prompts
   # Observability - Core Settings
   - key: OTEL_SERVICE_NAME
-    value: agents-gateway
+    value: hivegate
   - key: OTEL_ENVIRONMENT
     secret: otel-environment
   - key: OTEL_SERVICE_VERSION

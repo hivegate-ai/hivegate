@@ -1591,11 +1591,11 @@ python -m pytest tests/ --cov=workspace_suite --cov=toolkits --cov-report=term-m
 2. Enter email addresses of test users
 3. Click **SAVE AND CONTINUE**
 
-#### 6. Service Account Setup (for agents-gateway authentication)
+#### 6. Service Account Setup (for hivegate authentication)
 
 1. Navigate to **IAM & Admin** → **Service Accounts**
 2. Click **+ CREATE SERVICE ACCOUNT**
-3. Set **Service account name**: `agents-gateway`
+3. Set **Service account name**: `hivegate`
 4. Click **CREATE AND CONTINUE**
 5. Grant role: **Service Account Token Creator** (optional, for impersonation)
 6. Click **DONE**
@@ -1660,7 +1660,7 @@ python -m pytest tests/ --cov=workspace_suite --cov=toolkits --cov-report=term-m
 Tokens are stored in the `user_tokens` table in PostgreSQL:
 
 ```sql
--- Schema (already exists in agents-gateway)
+-- Schema (already exists in hivegate)
 CREATE TABLE user_tokens (
     id SERIAL PRIMARY KEY,
     user_id VARCHAR NOT NULL,
@@ -1903,7 +1903,7 @@ provider = provider_class(config)
 **Symptom**: `error_card("Authentication failed")`
 
 **Causes**:
-- Token not stored in agents-gateway database
+- Token not stored in hivegate database
 - Wrong integration_key used for token lookup
 - Token expired and refresh failed
 - User not authenticated
@@ -2113,7 +2113,7 @@ def _call_api_with_retry(self, url, headers, payload):
 ```python
 def _verify_scopes(self, required_scopes: List[str]) -> bool:
     """Verify token has required scopes."""
-    # Fetch token metadata from agents-gateway
+    # Fetch token metadata from hivegate
     token_data = self._get_token_metadata()
     granted_scopes = token_data.get("scopes", [])
 
@@ -2144,7 +2144,7 @@ def perform_operation(self, ...):
 ```bash
 # Service URLs
 PROMPTS_SERVICE_URL=https://prompts-service.run.app
-AGENTS_SERVICE_URL=https://agents-gateway.run.app
+AGENTS_SERVICE_URL=https://hivegate.run.app
 BASE_URL=https://chat-server.run.app
 
 # Google Cloud
@@ -2155,7 +2155,7 @@ GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
 GENAI_MODEL_ID=gemini-2.5-pro
 GENAI_API_KEY=your-production-api-key
 
-# Database (agents-gateway)
+# Database (hivegate)
 DB_HOST=your-cloudsql-instance
 DB_PORT=5432
 DB_NAME=agent_api
@@ -2248,10 +2248,10 @@ curl https://login.microsoftonline.com/common/oauth2/v2.0/authorize \
 ./scripts/build_image.sh
 
 # Tag for Google Container Registry
-docker tag agents-gateway gcr.io/your-project-id/agents-gateway:latest
+docker tag hivegate gcr.io/your-project-id/hivegate:latest
 
 # Push to GCR
-docker push gcr.io/your-project-id/agents-gateway:latest
+docker push gcr.io/your-project-id/hivegate:latest
 ```
 
 #### 2. Deploy to Cloud Run
@@ -2261,8 +2261,8 @@ docker push gcr.io/your-project-id/agents-gateway:latest
 ./scripts/deploy_to_cloud_run.sh
 
 # Or manually
-gcloud run deploy agents-gateway \
-  --image gcr.io/your-project-id/agents-gateway:latest \
+gcloud run deploy hivegate \
+  --image gcr.io/your-project-id/hivegate:latest \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
@@ -2306,7 +2306,7 @@ gcloud secrets add-iam-policy-binding service-account-key \
   --role="roles/secretmanager.secretAccessor"
 
 # Mount secret in Cloud Run
-gcloud run services update agents-gateway \
+gcloud run services update hivegate \
   --set-secrets "/app/service-account.json=service-account-key:latest"
 ```
 
@@ -2315,8 +2315,8 @@ gcloud run services update agents-gateway \
 #### 1. Health Check
 
 ```bash
-# Check agents-gateway health
-curl https://agents-gateway.run.app/health
+# Check hivegate health
+curl https://hivegate.run.app/health
 
 # Expected response
 {"status": "healthy", "version": "1.0.0"}
@@ -2326,7 +2326,7 @@ curl https://agents-gateway.run.app/health
 
 ```bash
 # Store test token
-curl -X POST https://agents-gateway.run.app/v2/users/testuser/tokens \
+curl -X POST https://hivegate.run.app/v2/users/testuser/tokens \
   -H "Content-Type: application/json" \
   -d '{
     "integration_key": "google_calendar",
@@ -2341,7 +2341,7 @@ curl -X POST https://agents-gateway.run.app/v2/users/testuser/tokens \
   }'
 
 # Verify retrieval
-curl https://agents-gateway.run.app/v2/users/testuser/tokens/google_calendar
+curl https://hivegate.run.app/v2/users/testuser/tokens/google_calendar
 ```
 
 #### 3. End-to-End Toolkit Test
@@ -2365,7 +2365,7 @@ curl -X POST https://chat-server.run.app/chat \
 
 ```bash
 # Agent-API logs
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=agents-gateway" \
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=hivegate" \
   --limit 50 \
   --format json
 
@@ -2381,7 +2381,7 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 
 ```bash
 # Create uptime check
-gcloud monitoring uptime-checks create https://agents-gateway.run.app/health \
+gcloud monitoring uptime-checks create https://hivegate.run.app/health \
   --display-name "Agent API Health" \
   --check-interval 60
 
@@ -2567,7 +2567,7 @@ def _get_token(self) -> Optional[str]:
 ```
 
 **Benefits**:
-- Reduces API calls to agents-gateway
+- Reduces API calls to hivegate
 - Improves performance (cache hits are instant)
 - Automatic expiration (TTL-based)
 - Thread-safe (uses locks internally)

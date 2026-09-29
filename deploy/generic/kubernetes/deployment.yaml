@@ -1,14 +1,14 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: agents-gateway
+  name: hivegate
   labels:
-    app: agents-gateway
+    app: hivegate
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: agents-gateway
+      app: hivegate
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -17,11 +17,11 @@ spec:
   template:
     metadata:
       labels:
-        app: agents-gateway
+        app: hivegate
     spec:
       containers:
-        - name: agents-gateway
-          image: ghcr.io/agno-agi/agents-gateway:latest
+        - name: hivegate
+          image: ghcr.io/hivegate-ai/hivegate:latest
           ports:
             - containerPort: 8080
               protocol: TCP
@@ -31,32 +31,32 @@ spec:
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
-                  name: agents-gateway-db
+                  name: hivegate-db
                   key: username
             - name: DB_PASS
               valueFrom:
                 secretKeyRef:
-                  name: agents-gateway-db
+                  name: hivegate-db
                   key: password
             - name: DB_HOST
               valueFrom:
                 configMapKeyRef:
-                  name: agents-gateway-config
+                  name: hivegate-config
                   key: db-host
             - name: DB_PORT
               valueFrom:
                 configMapKeyRef:
-                  name: agents-gateway-config
+                  name: hivegate-config
                   key: db-port
             - name: DB_DATABASE
               valueFrom:
                 configMapKeyRef:
-                  name: agents-gateway-config
+                  name: hivegate-config
                   key: db-database
             - name: SECRET_TOKEN_ENC_KEY
               valueFrom:
                 secretKeyRef:
-                  name: agents-gateway-secrets
+                  name: hivegate-secrets
                   key: token-encryption-key
           resources:
             requests:
@@ -93,12 +93,12 @@ spec:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: agents-gateway-hpa
+  name: hivegate-hpa
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: agents-gateway
+    name: hivegate
   minReplicas: 2
   maxReplicas: 10
   metrics:

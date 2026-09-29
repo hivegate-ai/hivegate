@@ -852,7 +852,7 @@ The following environment variables configure the demo toolkits app:
 ```bash
 # Service URLs
 PROMPTS_SERVICE_URL=https://dev-prompts-service-<project>.run.app
-AGENTS_SERVICE_URL=https://dev-agents-gateway-<project>.run.app
+AGENTS_SERVICE_URL=https://dev-hivegate-<project>.run.app
 
 # Google Cloud
 GOOGLE_SERVICE_ACCOUNT_KEY_PATH=/path/to/service-account.json
@@ -899,7 +899,7 @@ python demo_toolkits_app.py
 - **Host**: `0.0.0.0`
 - **Default Port**: `8080`
 - **Auto-reload**: Enabled (for development)
-- **Title**: Agents Gateway Demo API
+- **Title**: HiveGate Demo API
 - **Version**: 1.0.0
 
 ---
@@ -907,18 +907,18 @@ python demo_toolkits_app.py
 ## Integration Notes
 
 ### Relationship to Main API
-This is a **standalone chat server** separate from the main agents-gateway application:
+This is a **standalone chat server** separate from the main hivegate application:
 
-| Feature | demo_toolkits_app.py | agents-gateway (main) |
+| Feature | demo_toolkits_app.py | hivegate (main) |
 |---------|---------------------|------------------|
 | **Port** | 8080 | 8000 |
 | **Database** | SQLite (agent sessions) | PostgreSQL (agent metadata) |
 | **Purpose** | Chat with toolkit integration | Agent CRUD & management |
 | **Endpoints** | /chat, /toolkit/* | /v2/agents, /v2/teams, /v2/knowledge |
-| **Authentication** | Service account → agents-gateway | Direct (no auth in dev) |
+| **Authentication** | Service account → hivegate | Direct (no auth in dev) |
 
 ### Token Management
-The demo app fetches OAuth tokens from the main agents-gateway:
+The demo app fetches OAuth tokens from the main hivegate:
 - Uses service account authentication
 - Calls `/v2/users/{user_id}/tokens/{integration_key}`
 - Supports auto-refresh for expired OAuth2 tokens

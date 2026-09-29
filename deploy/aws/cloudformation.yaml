@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Agents Gateway - AWS ECS Fargate Deployment'
+Description: 'HiveGate - AWS ECS Fargate Deployment'
 
 Parameters:
   Environment:
@@ -32,7 +32,7 @@ Resources:
   ECRRepository:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: agents-gateway
+      RepositoryName: hivegate
       ImageScanningConfiguration:
         ScanOnPush: true
 
@@ -40,7 +40,7 @@ Resources:
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: !Sub 'agents-gateway-${Environment}'
+      ClusterName: !Sub 'hivegate-${Environment}'
       CapacityProviders:
         - FARGATE
         - FARGATE_SPOT
@@ -54,14 +54,14 @@ Resources:
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub '/ecs/agents-gateway-${Environment}'
+      LogGroupName: !Sub '/ecs/hivegate-${Environment}'
       RetentionInDays: 30
 
   # Task Execution Role
   TaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub 'agents-gateway-execution-${Environment}'
+      RoleName: !Sub 'hivegate-execution-${Environment}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -80,13 +80,13 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource:
-                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:agents-gateway/*'
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:hivegate/*'
 
   # Task Role
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub 'agents-gateway-task-${Environment}'
+      RoleName: !Sub 'hivegate-task-${Environment}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -99,7 +99,7 @@ Resources:
   ServiceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Security group for Agents Gateway ECS service
+      GroupDescription: Security group for HiveGate ECS service
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -126,7 +126,7 @@ Resources:
   ApplicationLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub 'agents-gateway-${Environment}'
+      Name: !Sub 'hivegate-${Environment}'
       Scheme: internet-facing
       SecurityGroups:
         - !Ref ALBSecurityGroup
@@ -136,7 +136,7 @@ Resources:
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub 'agents-gateway-${Environment}'
+      Name: !Sub 'hivegate-${Environment}'
       Port: 8080
       Protocol: HTTP
       VpcId: !Ref VpcId
@@ -161,7 +161,7 @@ Resources:
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub 'agents-gateway-${Environment}'
+      Family: !Sub 'hivegate-${Environment}'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -170,8 +170,8 @@ Resources:
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       TaskRoleArn: !GetAtt TaskRole.Arn
       ContainerDefinitions:
-        - Name: agents-gateway
-          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/agents-gateway:${ImageTag}'
+        - Name: hivegate
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/hivegate:${ImageTag}'
           Essential: true
           PortMappings:
             - ContainerPort: 8080
@@ -195,7 +195,7 @@ Resources:
     Type: AWS::ECS::Service
     DependsOn: HTTPListener
     Properties:
-      ServiceName: !Sub 'agents-gateway-${Environment}'
+      ServiceName: !Sub 'hivegate-${Environment}'
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref TaskDefinition
       DesiredCount: 2
@@ -207,7 +207,7 @@ Resources:
             - !Ref ServiceSecurityGroup
           Subnets: !Ref SubnetIds
       LoadBalancers:
-        - ContainerName: agents-gateway
+        - ContainerName: hivegate
           ContainerPort: 8080
           TargetGroupArn: !Ref TargetGroup
       DeploymentConfiguration:

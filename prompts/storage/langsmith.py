@@ -15,7 +15,7 @@ class LangSmithStorage(PromptStorageBackend):
         - LANGCHAIN_API_KEY environment variable
         - Optional: LANGCHAIN_HUB_URL for custom LangSmith instance
 
-    Install with: pip install agents-gateway[langsmith]
+    Install with: pip install hivegate[langsmith]
     """
 
     def __init__(self):
@@ -24,7 +24,7 @@ class LangSmithStorage(PromptStorageBackend):
             from langsmith import Client  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
-                "LangSmith storage requires langsmith package. Install with: pip install agents-gateway[langsmith]"
+                "LangSmith storage requires langsmith package. Install with: pip install hivegate[langsmith]"
             ) from e
 
         api_key = os.getenv("LANGCHAIN_API_KEY")

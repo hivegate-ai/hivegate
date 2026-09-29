@@ -1,16 +1,16 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: agents-gateway-config
+  name: hivegate-config
 data:
   db-host: "postgres-service"
   db-port: "5432"
-  db-database: "agents_gateway"
+  db-database: "hivegate"
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: agents-gateway-db
+  name: hivegate-db
 type: Opaque
 stringData:
   username: "agadmin"
@@ -19,7 +19,7 @@ stringData:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: agents-gateway-secrets
+  name: hivegate-secrets
 type: Opaque
 stringData:
   token-encryption-key: "CHANGE_ME_BASE64_FERNET_KEY"

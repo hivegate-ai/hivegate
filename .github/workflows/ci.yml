@@ -95,7 +95,7 @@ jobs:
             -v
 
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12' && github.repository == 'liberzon/agents-gateway'
+        if: matrix.python-version == '3.12' && github.repository == 'hivegate-ai/hivegate'
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

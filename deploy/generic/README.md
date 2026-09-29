@@ -1,6 +1,6 @@
 # Generic Deployment
 
-Deploy Agents Gateway using Docker Compose or Kubernetes on any infrastructure.
+Deploy HiveGate using Docker Compose or Kubernetes on any infrastructure.
 
 ## Docker Compose (Production)
 
@@ -40,7 +40,7 @@ Create a `.env` file:
 # Database
 DB_USER=agadmin
 DB_PASS=secure-password-here
-DB_DATABASE=agents_gateway
+DB_DATABASE=hivegate
 
 # Encryption
 SECRET_TOKEN_ENC_KEY=your-base64-fernet-key
@@ -64,7 +64,7 @@ events {
 
 http {
     upstream backend {
-        server agents-gateway:8080;
+        server hivegate:8080;
     }
 
     server {
@@ -108,7 +108,7 @@ docker compose -f deploy/generic/docker-compose.prod.yaml --profile with-nginx u
 1. **Create namespace**:
 
 ```bash
-kubectl create namespace agents-gateway
+kubectl create namespace hivegate
 ```
 
 2. **Update secrets**:
@@ -120,14 +120,14 @@ Edit `deploy/generic/kubernetes/configmap.yaml` and replace placeholder values:
 3. **Apply manifests**:
 
 ```bash
-kubectl apply -f deploy/generic/kubernetes/ -n agents-gateway
+kubectl apply -f deploy/generic/kubernetes/ -n hivegate
 ```
 
 4. **Verify**:
 
 ```bash
-kubectl get pods -n agents-gateway
-kubectl get svc -n agents-gateway
+kubectl get pods -n hivegate
+kubectl get svc -n hivegate
 ```
 
 ### Configuration
@@ -135,26 +135,26 @@ kubectl get svc -n agents-gateway
 #### Update ConfigMap
 
 ```bash
-kubectl create configmap agents-gateway-config \
+kubectl create configmap hivegate-config \
   --from-literal=db-host=your-db-host \
   --from-literal=db-port=5432 \
-  --from-literal=db-database=agents_gateway \
-  -n agents-gateway \
+  --from-literal=db-database=hivegate \
+  -n hivegate \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 #### Update Secrets
 
 ```bash
-kubectl create secret generic agents-gateway-db \
+kubectl create secret generic hivegate-db \
   --from-literal=username=agadmin \
   --from-literal=password=your-secure-password \
-  -n agents-gateway \
+  -n hivegate \
   --dry-run=client -o yaml | kubectl apply -f -
 
-kubectl create secret generic agents-gateway-secrets \
+kubectl create secret generic hivegate-secrets \
   --from-literal=token-encryption-key=your-fernet-key \
-  -n agents-gateway \
+  -n hivegate \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
@@ -165,7 +165,7 @@ The deployment includes a HorizontalPodAutoscaler that scales between 2-10 repli
 Manual scaling:
 
 ```bash
-kubectl scale deployment agents-gateway --replicas=5 -n agents-gateway
+kubectl scale deployment hivegate --replicas=5 -n hivegate
 ```
 
 ### Ingress
@@ -177,7 +177,7 @@ spec:
   tls:
     - hosts:
         - your-domain.com
-      secretName: agents-gateway-tls
+      secretName: hivegate-tls
   rules:
     - host: your-domain.com
 ```
@@ -186,13 +186,13 @@ spec:
 
 ```bash
 # View logs
-kubectl logs -f deployment/agents-gateway -n agents-gateway
+kubectl logs -f deployment/hivegate -n hivegate
 
 # View events
-kubectl get events -n agents-gateway --sort-by='.lastTimestamp'
+kubectl get events -n hivegate --sort-by='.lastTimestamp'
 
 # Port forward for local testing
-kubectl port-forward svc/agents-gateway 8080:80 -n agents-gateway
+kubectl port-forward svc/hivegate 8080:80 -n hivegate
 ```
 
 ---
@@ -203,7 +203,7 @@ A Helm chart will be available for easier configuration management:
 
 ```bash
 helm repo add agno https://charts.agno.com
-helm install agents-gateway agno/agents-gateway \
+helm install hivegate hivegate/hivegate \
   --set database.host=your-db-host \
   --set secrets.tokenEncryptionKey=your-key
 ```
@@ -236,7 +236,7 @@ DB_HOST=your-postgres-host
 DB_PORT=5432
 DB_USER=agadmin
 DB_PASS=secure-password
-DB_DATABASE=agents_gateway
+DB_DATABASE=hivegate
 DB_SSL_MODE=require
 ```
 
@@ -248,17 +248,17 @@ DB_SSL_MODE=require
 
 ```bash
 # Check logs
-docker logs agents-gateway
+docker logs hivegate
 
 # Check health
-docker inspect agents-gateway | jq '.[0].State.Health'
+docker inspect hivegate | jq '.[0].State.Health'
 ```
 
 ### Database connection issues
 
 ```bash
 # Test database connectivity
-docker exec agents-gateway python -c "
+docker exec hivegate python -c "
 from db.session import get_db
 next(get_db())
 print('Database connection successful')
@@ -269,8 +269,8 @@ print('Database connection successful')
 
 ```bash
 # Describe pod
-kubectl describe pod -l app=agents-gateway -n agents-gateway
+kubectl describe pod -l app=hivegate -n hivegate
 
 # Check previous logs
-kubectl logs -l app=agents-gateway -n agents-gateway --previous
+kubectl logs -l app=hivegate -n hivegate --previous
 ```

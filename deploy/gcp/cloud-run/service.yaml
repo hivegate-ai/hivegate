@@ -1,7 +1,7 @@
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: agents-gateway
+  name: hivegate
   labels:
     cloud.googleapis.com/location: us-central1
   annotations:
@@ -18,9 +18,9 @@ spec:
     spec:
       containerConcurrency: 100
       timeoutSeconds: 300
-      serviceAccountName: agents-gateway-sa@PROJECT_ID.iam.gserviceaccount.com
+      serviceAccountName: hivegate-sa@PROJECT_ID.iam.gserviceaccount.com
       containers:
-        - image: gcr.io/PROJECT_ID/agents-gateway:latest
+        - image: gcr.io/PROJECT_ID/hivegate:latest
           ports:
             - name: http1
               containerPort: 8080

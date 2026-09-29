@@ -1,9 +1,9 @@
 version: "3.8"
 
 services:
-  agents-gateway:
-    image: ghcr.io/agno-agi/agents-gateway:latest
-    container_name: agents-gateway
+  hivegate:
+    image: ghcr.io/hivegate-ai/hivegate:latest
+    container_name: hivegate
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -13,7 +13,7 @@ services:
       - DB_PASS=${DB_PASS}
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_DATABASE=${DB_DATABASE:-agents_gateway}
+      - DB_DATABASE=${DB_DATABASE:-hivegate}
       - SECRET_TOKEN_ENC_KEY=${SECRET_TOKEN_ENC_KEY}
       - QDRANT_URL=${QDRANT_URL:-}
     depends_on:
@@ -38,16 +38,16 @@ services:
 
   postgres:
     image: postgres:15-alpine
-    container_name: agents-gateway-db
+    container_name: hivegate-db
     restart: unless-stopped
     environment:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASS}
-      - POSTGRES_DB=${DB_DATABASE:-agents_gateway}
+      - POSTGRES_DB=${DB_DATABASE:-hivegate}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_DATABASE:-agents_gateway}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_DATABASE:-hivegate}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -62,7 +62,7 @@ services:
   # Optional: Qdrant for vector database
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: agents-gateway-qdrant
+    container_name: hivegate-qdrant
     restart: unless-stopped
     ports:
       - "6333:6333"
@@ -82,7 +82,7 @@ services:
   # Optional: Nginx reverse proxy with SSL
   nginx:
     image: nginx:alpine
-    container_name: agents-gateway-nginx
+    container_name: hivegate-nginx
     restart: unless-stopped
     ports:
       - "80:80"
@@ -91,7 +91,7 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
     depends_on:
-      - agents-gateway
+      - hivegate
     networks:
       - agents-network
     profiles:

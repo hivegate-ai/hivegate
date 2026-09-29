@@ -1,13 +1,13 @@
-# Agents Gateway
+# HiveGate
 
-**📖 Docs & landing page: [agentsgateway.dev](https://agentsgateway.dev)**
+**📖 Docs & landing page: [hivegate.dev](https://hivegate.dev)**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template?template=https://github.com/liberzon/agents-gateway-deploy)
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/liberzon/agents-gateway-deploy)
-[![Deploy to Koyeb](https://img.shields.io/badge/Deploy%20to-Koyeb-121212?style=for-the-badge&logo=koyeb&logoColor=white)](https://app.koyeb.com/deploy?type=git&repository=github.com/liberzon/agents-gateway-deploy)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template?template=https://github.com/hivegate-ai/deploy)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/hivegate-ai/deploy)
+[![Deploy to Koyeb](https://img.shields.io/badge/Deploy%20to-Koyeb-121212?style=for-the-badge&logo=koyeb&logoColor=white)](https://app.koyeb.com/deploy?type=git&repository=github.com/hivegate-ai/deploy)
 
 A production-ready API gateway for serving AI agents. Built with FastAPI and [Agno 2.5.16+](https://github.com/agno-ai/agno).
 
@@ -31,7 +31,7 @@ A production-ready API gateway for serving AI agents. Built with FastAPI and [Ag
 
 ```sh
 git clone <repository-url>
-cd agents-gateway
+cd hivegate
 
 # Start PostgreSQL + Qdrant (seeds demo agents automatically)
 docker compose up -d
@@ -115,7 +115,7 @@ docker compose down -v     # Reset everything
 ## Project Structure
 
 ```
-agents-gateway/
+hivegate/
 ├── api/                    # FastAPI application
 │   ├── routes/v2/          # V2 API endpoints (agents, teams, knowledge, tokens,
 │   │                       #   prompts, skills, approvals, engines, targets)
@@ -225,9 +225,9 @@ pytest tests/v2/
 
 | Platform | Configuration | Script |
 |----------|---------------|--------|
-| [Railway](https://railway.app/template?template=https://github.com/liberzon/agents-gateway-deploy) | `railway.toml` | `scripts/deploy_to_railway.sh` |
-| [Render](https://render.com/deploy?repo=https://github.com/liberzon/agents-gateway-deploy) | `render.yaml` | `scripts/deploy_to_render.sh` |
-| [Koyeb](https://app.koyeb.com/deploy?type=git&repository=github.com/liberzon/agents-gateway-deploy) | `koyeb.yaml` | `scripts/deploy_to_koyeb.sh` |
+| [Railway](https://railway.app/template?template=https://github.com/hivegate-ai/deploy) | `railway.toml` | `scripts/deploy_to_railway.sh` |
+| [Render](https://render.com/deploy?repo=https://github.com/hivegate-ai/deploy) | `render.yaml` | `scripts/deploy_to_render.sh` |
+| [Koyeb](https://app.koyeb.com/deploy?type=git&repository=github.com/hivegate-ai/deploy) | `koyeb.yaml` | `scripts/deploy_to_koyeb.sh` |
 
 ### Cloud Platforms
 
@@ -299,7 +299,7 @@ OTEL_OTLP_ENDPOINT=http://collector:4317
 ## Support
 
 - [Agno Documentation](https://docs.agno.com)
-- [Report an Issue](https://github.com/liberzon/agents-gateway/issues)
+- [Report an Issue](https://github.com/hivegate-ai/hivegate/issues)
 
 ## License
 

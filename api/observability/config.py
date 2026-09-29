@@ -36,7 +36,7 @@ class ObservabilitySettings(BaseSettings):
     """
 
     # Service identification
-    service_name: str = Field(default="agents-gateway")
+    service_name: str = Field(default="hivegate")
     service_version: str = Field(default="1.0.0")
     environment: str = Field(default="development")
 
@@ -66,7 +66,7 @@ class ObservabilitySettings(BaseSettings):
     @field_validator("service_name", mode="before")
     @classmethod
     def set_service_name(cls, v: str, info: FieldValidationInfo) -> str:
-        return os.environ.get("OTEL_SERVICE_NAME", v or "agents-gateway")
+        return os.environ.get("OTEL_SERVICE_NAME", v or "hivegate")
 
     @field_validator("service_version", mode="before")
     @classmethod
