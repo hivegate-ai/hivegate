@@ -9,6 +9,16 @@ from agents import Model, ModelProvider, get_provider
 from agents.model_resolver import resolve_model_id
 from agents.openai_responses import ReasoningAwareOpenAIResponses
 
+
+class ProviderNotConfiguredError(ValueError):
+    """The requested model's provider has no API key on this deployment.
+
+    A ValueError, as before, so existing callers still catch it; the chat routes map
+    it to 503 with this message instead of a generic 500 that hides which key is
+    missing.
+    """
+
+
 # Z.ai's OpenAI-compatible endpoint (docs.z.ai, "OpenAI Python SDK").
 ZAI_BASE_URL = "https://api.z.ai/api/paas/v4/"
 
@@ -53,7 +63,7 @@ def create_model(
 
     if provider == ModelProvider.OPENAI:
         if not openai_api_key:
-            raise ValueError("OpenAI API key is required for OpenAI models")
+            raise ProviderNotConfiguredError("OpenAI API key is required for OpenAI models")
 
         # Responses API, not Chat Completions: GPT-6 calls tools on Chat Completions
         # only with reasoning off. See agents/openai_responses.py.
@@ -67,7 +77,7 @@ def create_model(
 
     elif provider == ModelProvider.GEMINI:
         if not gemini_api_key:
-            raise ValueError("Gemini API key is required for Gemini models")
+            raise ProviderNotConfiguredError("Gemini API key is required for Gemini models")
 
         kwargs = {"id": model_id, "api_key": gemini_api_key}
         if temperature is not None:
@@ -87,7 +97,7 @@ def create_model(
             raise ImportError("anthropic package is not installed. Install it with: pip install anthropic") from e
 
         if not anthropic_api_key:
-            raise ValueError("Anthropic API key is required for Claude models")
+            raise ProviderNotConfiguredError("Anthropic API key is required for Claude models")
 
         kwargs = {"id": model_id, "api_key": anthropic_api_key}
         if temperature is not None:
@@ -99,7 +109,7 @@ def create_model(
 
     elif provider == ModelProvider.XAI:
         if not xai_api_key:
-            raise ValueError("xAI API key is required for Grok models")
+            raise ProviderNotConfiguredError("xAI API key is required for Grok models")
 
         # agno's xAI speaks xAI's OpenAI-compatible Chat Completions endpoint.
         # (agno's xAIResponses adds SuperGrok OAuth, which the gateway doesn't use.)
@@ -113,7 +123,7 @@ def create_model(
 
     elif provider == ModelProvider.ZAI:
         if not zai_api_key:
-            raise ValueError("Z.ai API key is required for GLM models")
+            raise ProviderNotConfiguredError("Z.ai API key is required for GLM models")
 
         kwargs = {
             "id": model_id,
@@ -131,7 +141,7 @@ def create_model(
 
     elif provider == ModelProvider.DEEPSEEK:
         if not deepseek_api_key:
-            raise ValueError("DeepSeek API key is required for DeepSeek models")
+            raise ProviderNotConfiguredError("DeepSeek API key is required for DeepSeek models")
 
         kwargs = {"id": model_id, "api_key": deepseek_api_key}
         if temperature is not None:

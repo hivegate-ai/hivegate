@@ -94,7 +94,7 @@ newest model in that tier without a code change, and never moves to a pricier ti
 | Google | `google:flash-lite-latest`, `google:flash-latest`, `google:pro-latest` |
 | xAI | `xai:grok-latest` |
 
-Z.ai GLM models (`glm-5.3`, `glm-5.3-flash`, ...) are pinned ids only - Z.ai
+Z.ai GLM models (`glm-5.3`, `glm-5.3-flashx`, `glm-5.3-flash`, `glm-5.2`) are pinned ids only - Z.ai
 documents no model-listing endpoint to resolve an alias against. DeepSeek has two:
 `deepseek-flash` (itself a moving name, now V4.1-Flash) and `deepseek-v4-pro`. OpenAI models run
 on the Responses API: GPT-6 calls tools on Chat Completions only with reasoning off.

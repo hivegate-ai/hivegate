@@ -90,14 +90,11 @@ class Model(str, Enum):
     # ===== Z.ai GLM Models =====
     # Served through Z.ai's OpenAI-compatible endpoint (agno has no Z.ai class). No
     # latest-of-a-tier alias: Z.ai documents no model-listing endpoint to resolve one.
+    # Only models Z.ai documents with function calling: every gateway agent has tools.
     glm_5_3 = "glm-5.3"
     glm_5_3_flashx = "glm-5.3-flashx"
     glm_5_3_flash = "glm-5.3-flash"
     glm_5_2 = "glm-5.2"
-    glm_5_1 = "glm-5.1"
-    glm_5 = "glm-5"
-    glm_4_7 = "glm-4.7"
-    glm_4_7_flash = "glm-4.7-flash"
 
     # ===== DeepSeek Models =====
     # deepseek-flash is a moving name (now V4.1-Flash); the legacy deepseek-v4-flash

@@ -91,6 +91,20 @@ class TestCreateModel(unittest.TestCase):
             create_model(Model.deepseek_flash)
         self.assertIn("DeepSeek", str(ctx.exception))
 
+    def test_missing_key_is_a_provider_not_configured_error(self):
+        from agents.model_factory import ProviderNotConfiguredError
+
+        for model in [
+            Model.gpt_6_luna,
+            Model.gemini_3_8_flash,
+            Model.claude_haiku_4_5,
+            Model.grok_4_7,
+            Model.glm_5_3,
+            Model.deepseek_flash,
+        ]:
+            with self.subTest(model=model), self.assertRaises(ProviderNotConfiguredError):
+                create_model(model)
+
     def test_missing_xai_api_key_raises(self):
         with self.assertRaises(ValueError) as ctx:
             create_model(Model.grok_4_7)
