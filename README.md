@@ -1,16 +1,36 @@
 # HiveGate
 
-**📖 Docs & landing page: [hivegate.dev](https://hivegate.dev)**
+**Run your Agno agents as a production API.**
+
+[![HiveGate](https://hivegate.dev/assets/og-image.png)](https://hivegate.dev)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![GitHub stars](https://img.shields.io/github/stars/hivegate-ai/hivegate?style=social)](https://github.com/hivegate-ai/hivegate/stargazers)
 
+HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/agno-agi/agno). You write the agent, and HiveGate gives it what production needs:
+- per-user sessions
+- OAuth tokens for Google and Microsoft
+- human approval for risky tool calls
+- multi-agent teams with a supervisor
+- versioned prompts
+- tracing
+
+**[Website](https://hivegate.dev)** · **[Docs](https://hivegate.dev/docs/)** · **[Deploy guide](https://hivegate.dev/deploy/)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)**
+
+```sh
+git clone https://github.com/hivegate-ai/hivegate && cd hivegate
+docker compose up -d                                   # Postgres + Qdrant, seeds demo agents
+./scripts/dev_setup.sh && source .venv/bin/activate && ./scripts/start_server.sh
+```
+
+Or deploy the prebuilt image in one click:
+
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template?template=https://github.com/hivegate-ai/deploy)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/hivegate-ai/deploy)
 [![Deploy to Koyeb](https://img.shields.io/badge/Deploy%20to-Koyeb-121212?style=for-the-badge&logo=koyeb&logoColor=white)](https://app.koyeb.com/deploy?type=git&repository=github.com/hivegate-ai/deploy)
 
-A production-ready API gateway for serving AI agents. Built with FastAPI and [Agno 3](https://github.com/agno-agi/agno).
+> HiveGate is not a request-routing API gateway like Kong. It runs AI agents and exposes them over a REST API.
 
 ## Features
 
@@ -31,7 +51,7 @@ A production-ready API gateway for serving AI agents. Built with FastAPI and [Ag
 ### 1. Clone and start
 
 ```sh
-git clone <repository-url>
+git clone https://github.com/hivegate-ai/hivegate
 cd hivegate
 
 # Start PostgreSQL + Qdrant (seeds demo agents automatically)
