@@ -145,7 +145,7 @@ tenacity==9.1.4
 tqdm==4.70.1
 truststore==0.10.4
 typer==0.27.2
-types-cachetools==7.0.0.20260518
+types-cachetools==7.0.0.20260713
 types-dateparser==1.4.3.20260907
 types-requests==2.33.0.20260518
 typing-extensions==4.16.0
