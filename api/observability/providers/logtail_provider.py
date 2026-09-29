@@ -88,9 +88,13 @@ class LogtailLoggingProvider(LoggingProvider):
         try:
             from logtail import LogtailHandler
 
-            self._handler = LogtailHandler(
-                source_token=self._config.betterstack_source_token,
-                host=self._config.betterstack_host,
+            source_token = self._config.betterstack_source_token
+            host = self._config.betterstack_host
+            # Omit host when unset so logtail falls back to its own default endpoint.
+            self._handler = (
+                LogtailHandler(source_token=source_token, host=host)
+                if host
+                else LogtailHandler(source_token=source_token)
             )
             self._handler.setFormatter(JsonFormatter())
 
