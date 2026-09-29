@@ -79,18 +79,22 @@ class TestModelEnum(unittest.TestCase):
             "gemini_3_1_pro": "gemini-3.1-pro-preview",
             "gemini_3_flash": "gemini-3-flash-preview",
             # Anthropic models
+            # Current lineup
             "claude_fable_5_1": "claude-fable-5-1",
-            "claude_fable_5": "claude-fable-5",
             "claude_opus_5_5": "claude-opus-5-5",
+            "claude_sonnet_5_5": "claude-sonnet-5-5",
+            "claude_haiku_4_5": "claude-haiku-4-5-20251001",
+            "claude_haiku_4_5_undated": "claude-haiku-4-5",
+            # Legacy, still available
+            "claude_fable_5": "claude-fable-5",
             "claude_opus_5": "claude-opus-5",
             "claude_opus_4_8": "claude-opus-4-8",
             "claude_opus_4_7": "claude-opus-4-7",
             "claude_opus_4_6": "claude-opus-4-6",
-            "claude_sonnet_5_5": "claude-sonnet-5-5",
+            "claude_opus_4_5": "claude-opus-4-5",
             "claude_sonnet_5": "claude-sonnet-5",
             "claude_sonnet_4_6": "claude-sonnet-4-6",
-            "claude_haiku_4_5": "claude-haiku-4-5-20251001",
-            "claude_haiku_4_5_undated": "claude-haiku-4-5",
+            "claude_sonnet_4_5": "claude-sonnet-4-5",
         }
 
         for attr_name, expected_value in expected_models.items():
@@ -117,7 +121,7 @@ class TestModelEnum(unittest.TestCase):
     def test_model_enum_membership(self):
         """Test enum membership and iteration."""
         all_models = list(Model)
-        self.assertEqual(len(all_models), 31)
+        self.assertEqual(len(all_models), 33)
 
         expected_values = [
             "gpt-5.4",
