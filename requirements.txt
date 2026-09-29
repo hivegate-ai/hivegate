@@ -147,7 +147,7 @@ truststore==0.10.4
 typer==0.27.2
 types-cachetools==7.0.0.20260713
 types-dateparser==1.4.3.20260907
-types-requests==2.33.0.20260518
+types-requests==2.33.0.20260906
 typing-extensions==4.16.0
 typing-inspection==0.4.4
 tzlocal==5.4.4
