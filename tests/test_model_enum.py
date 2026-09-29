@@ -5,6 +5,54 @@ import pytest
 from agents import Model, ModelProvider, get_provider
 
 
+class TestResolverFallbacksAreRealModels(unittest.TestCase):
+    """Every tier fallback must be a member of Model.
+
+    `model_resolver.TIERS` names a concrete model per tier, used when the vendor
+    cannot be asked (no key, network error, nothing matched). Six of the eight
+    named a model this enum did not contain, so that path produced an id the rest
+    of the system rejects — `ChatRequest.model` is typed `Model`, and anything
+    outside it is a 422.
+
+    That is the same drift that caused the 2026-09-29 outage from the other
+    direction: `anthropic:sonnet-latest` resolved to a live model the enum had
+    never heard of, so it could run but could not be pinned. Keeping the two files
+    in step is the point of this test.
+    """
+
+    def test_every_tier_fallback_is_an_enum_member(self):
+        from agents.model_resolver import TIERS
+
+        values = {m.value for m in Model}
+        for alias, tier in TIERS.items():
+            with self.subTest(alias=alias):
+                self.assertIn(
+                    tier.fallback,
+                    values,
+                    f"{alias} falls back to {tier.fallback!r}, which is not a Model member",
+                )
+
+    def test_every_tier_alias_is_an_enum_member(self):
+        """The alias strings themselves are what callers send, so they must validate."""
+        from agents.model_resolver import TIERS
+
+        values = {m.value for m in Model}
+        for alias in TIERS:
+            with self.subTest(alias=alias):
+                self.assertIn(alias, values)
+
+    def test_every_member_has_a_known_provider(self):
+        """get_provider() must not raise on anything this enum accepts.
+
+        Iterates `__members__.values()` rather than the class: both are correct,
+        but CodeQL's py/non-iterable-in-for-loop does not model `EnumMeta.__iter__`
+        and reports `for model in Model:` as an error, which blocks the merge.
+        """
+        for model in Model.__members__.values():
+            with self.subTest(model=model.value):
+                self.assertIsInstance(get_provider(model), ModelProvider)
+
+
 class TestModelEnum(unittest.TestCase):
     """Test cases for the Model enum class."""
 
@@ -20,6 +68,9 @@ class TestModelEnum(unittest.TestCase):
             "gpt_5_4": "gpt-5.4",
             "gpt_5_4_mini": "gpt-5.4-mini",
             "gpt_5_4_nano": "gpt-5.4-nano",
+            "gpt_5_6_luna": "gpt-5.6-luna",
+            "gpt_5_6_terra": "gpt-5.6-terra",
+            "gpt_5_6_sol": "gpt-5.6-sol",
             # Gemini stable models
             "gemini_2_5_pro": "gemini-2.5-pro",
             "gemini_2_5_flash": "gemini-2.5-flash",
@@ -28,9 +79,22 @@ class TestModelEnum(unittest.TestCase):
             "gemini_3_1_pro": "gemini-3.1-pro-preview",
             "gemini_3_flash": "gemini-3-flash-preview",
             # Anthropic models
-            "claude_opus_4_6": "claude-opus-4-6",
-            "claude_sonnet_4_6": "claude-sonnet-4-6",
+            # Current lineup
+            "claude_fable_5_1": "claude-fable-5-1",
+            "claude_opus_5_5": "claude-opus-5-5",
+            "claude_sonnet_5_5": "claude-sonnet-5-5",
             "claude_haiku_4_5": "claude-haiku-4-5-20251001",
+            "claude_haiku_4_5_undated": "claude-haiku-4-5",
+            # Legacy, still available
+            "claude_fable_5": "claude-fable-5",
+            "claude_opus_5": "claude-opus-5",
+            "claude_opus_4_8": "claude-opus-4-8",
+            "claude_opus_4_7": "claude-opus-4-7",
+            "claude_opus_4_6": "claude-opus-4-6",
+            "claude_opus_4_5": "claude-opus-4-5",
+            "claude_sonnet_5": "claude-sonnet-5",
+            "claude_sonnet_4_6": "claude-sonnet-4-6",
+            "claude_sonnet_4_5": "claude-sonnet-4-5",
         }
 
         for attr_name, expected_value in expected_models.items():
@@ -57,7 +121,7 @@ class TestModelEnum(unittest.TestCase):
     def test_model_enum_membership(self):
         """Test enum membership and iteration."""
         all_models = list(Model)
-        self.assertEqual(len(all_models), 19)
+        self.assertEqual(len(all_models), 33)
 
         expected_values = [
             "gpt-5.4",
