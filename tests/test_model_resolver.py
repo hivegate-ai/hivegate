@@ -154,8 +154,10 @@ class TestAliasesAreWiredIn(unittest.TestCase):
 
     @patch("agents.model_factory.resolve_model_id", return_value="claude-sonnet-5")
     def test_create_model_builds_the_resolved_model(self, _resolve):
+        # The factory builds RefusalAwareClaude (agents/claude_refusal.py), not agno's
+        # bare Claude, so that is the constructor that must receive the resolved id.
         claude = MagicMock()
-        with patch.dict("sys.modules", {"agno.models.anthropic": MagicMock(Claude=claude)}):
+        with patch("agents.claude_refusal.RefusalAwareClaude", claude):
             create_model(Model.anthropic_sonnet_latest, anthropic_api_key="k")
         claude.assert_called_once_with(id="claude-sonnet-5", api_key="k")
 
