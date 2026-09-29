@@ -13,7 +13,8 @@ It sends up to three variants, so the verdicts can be compared:
                    history (num_history_runs) and the current message
   main_no_history  the same, minus the history - isolates whether replayed history
                    is what triggers it
-  reasoning_cot    agno's manual chain-of-thought step: agno's reasoning prompt joined
+  reasoning_cot    (agno 2 only - agno 3 removed the step, and the variant is reported as
+                   skipped) agno's manual chain-of-thought step: agno's reasoning prompt joined
                    before the agent's (with a space, as agno's format_messages does),
                    the same messages, and the ReasoningSteps structured output sent the
                    way agno sends it (beta `output_format`). Rendered from whichever
@@ -122,11 +123,25 @@ def split_messages(stored: List[Dict[str, Any]]) -> Tuple[str, List[Dict[str, st
 # --- agno's reasoning step ----------------------------------------------------------
 
 
+class NoManualReasoning(RuntimeError):
+    """The installed agno has no manual chain-of-thought step to replay.
+
+    agno 3 removed it: a model without native thinking now gets a reasoning error
+    event instead ("use ReasoningTools for manual chain-of-thought"). That step is the
+    one Claude Sonnet 5.5 refused as reasoning_extraction, so on agno 3 there is
+    nothing of that shape left to replay.
+    """
+
+
 def agno_reasoning_request(model_id: str) -> Tuple[str, Dict[str, Any], str]:
     """(reasoning system prompt, output_format, agno version) as agno would build them."""
     import agno
     from agno.models.anthropic import Claude
-    from agno.reasoning.default import get_default_reasoning_agent
+
+    try:
+        from agno.reasoning.default import get_default_reasoning_agent
+    except ModuleNotFoundError as e:
+        raise NoManualReasoning("this agno has no manual chain-of-thought step (removed in agno 3)") from e
     from agno.reasoning.step import ReasoningSteps
     from agno.session import AgentSession
 
@@ -167,7 +182,11 @@ def build_requests(variants, system, history, current, model_id) -> List[Tuple[s
         elif variant == "main_no_history":
             requests.append((variant, {"system": system, "messages": [current]}, None))
         elif variant == "reasoning_cot":
-            reasoning_system, output_format, version = agno_reasoning_request(model_id)
+            try:
+                reasoning_system, output_format, version = agno_reasoning_request(model_id)
+            except NoManualReasoning as e:
+                requests.append((variant, {"skipped": str(e)}, None))
+                continue
             requests.append(
                 (
                     variant,
@@ -266,6 +285,9 @@ def main(argv=None) -> int:
 
     for model_id in targets:
         for variant, request, note in build_requests(variants, system, history, current, model_id):
+            if "skipped" in request:
+                print(json.dumps({"variant": variant, "model": model_id, "skipped": request["skipped"]}))
+                continue
             shape = {
                 "variant": variant,
                 "model": model_id,

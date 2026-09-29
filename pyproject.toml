@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [{ name = "Agno", email = "hello@agno.com" }]
 
 dependencies = [
-  "agno>=2.5.16",
+  "agno>=3.0.11",
   "fastapi[standard]",
   "google-genai>=1.72.0",
   "google-cloud-storage",
@@ -45,7 +45,7 @@ dependencies = [
   "opentelemetry-instrumentation-sqlalchemy>=0.62b0",
   # Observability - Sentry (backward compatibility)
   "sentry-sdk>=2.57.0",
-  "mcp>=1.28.0",
+  "mcp>=2.1.0",
   "msgpack>=1.2.1",
   "pydantic-settings>=2.14.2",
   "python-multipart>=0.0.31",

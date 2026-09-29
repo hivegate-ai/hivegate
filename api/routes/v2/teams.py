@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
+from agents.hitl import requirements_for
 from agents.model_resolver import resolve_model_id
 from agents.v2_selector import get_agent
 from api.routes.v2.agents import TenantProfile, UserProfile
@@ -709,7 +710,8 @@ async def commit_team_response_streamer(
 
     run_response = team.acontinue_run(  # type: ignore[attr-defined]
         run_id=body.run_id,
-        updated_tools=cached_run.tools,
+        # agno 3 resumes from `requirements` and ignores `updated_tools` - see agents/hitl.py.
+        requirements=requirements_for(cached_run, cached_run.tools),
         stream=True,
     )
     chunk_count = 0
@@ -1030,7 +1032,9 @@ async def commit_team_run_v2(team_id: str, body: TeamCommitRequest, db: Session 
         )
 
         # Continue the run with updated tools
-        response = await team.acontinue_run(run_id=body.run_id, updated_tools=cached_run.tools, stream=False)  # type: ignore[attr-defined]
+        response = await team.acontinue_run(  # type: ignore[attr-defined]
+            run_id=body.run_id, requirements=requirements_for(cached_run, cached_run.tools), stream=False
+        )
         logging.debug(f"Completed commit request for team: {team_id}")
 
         # Extract token usage metrics

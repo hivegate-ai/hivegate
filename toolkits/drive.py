@@ -865,7 +865,7 @@ class DriveToolkit(BaseToolkit):
                 logger.info(f"[ReadFile] Extracted {len(text_content)} characters from {file_name}")
 
                 # Add content to knowledge base with extracted text
-                dynamic_kb.add_content(
+                dynamic_kb.insert(
                     name=file_id,
                     text_content=text_content,
                     metadata=metadata,

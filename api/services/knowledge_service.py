@@ -430,8 +430,8 @@ class KnowledgeService:
                 kb, temp_file_to_cleanup = self._create_knowledge_base(entry)
                 if kb is None and temp_file_to_cleanup:
                     # Use the temp file path to add content to Knowledge
-                    # Knowledge.add_content_async can handle PDF, DOCX, etc. directly via path parameter
-                    await dynamic_kb.add_content_async(
+                    # Knowledge.ainsert (add_content_async before agno 3) can handle PDF, DOCX, etc. directly via path parameter
+                    await dynamic_kb.ainsert(
                         name=str(entry.file_id), path=str(temp_file_to_cleanup), metadata=base_meta
                     )
 
