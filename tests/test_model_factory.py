@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from agents import Model
-from agents.model_factory import create_model
+from agents.model_factory import PROVIDER_RETRY, create_model
 
 
 class TestCreateModel(unittest.TestCase):
@@ -13,7 +13,7 @@ class TestCreateModel(unittest.TestCase):
         mock_gemini_class.return_value = MagicMock()
         result = create_model(Model.gemini_2_5_pro, gemini_api_key="test-key")
 
-        mock_gemini_class.assert_called_once_with(id="gemini-2.5-pro", api_key="test-key")
+        mock_gemini_class.assert_called_once_with(id="gemini-2.5-pro", api_key="test-key", **PROVIDER_RETRY)
         self.assertEqual(result, mock_gemini_class.return_value)
 
     @patch("agents.model_factory.Gemini")
@@ -91,6 +91,30 @@ class TestCreateModel(unittest.TestCase):
             create_model(Model.deepseek_flash)
         self.assertIn("DeepSeek", str(ctx.exception))
 
+    def test_every_provider_retries_transient_errors(self):
+        """Real classes: agno defaults retries to 0, which turned a Gemini 503 into a
+        200 whose reply was the error JSON."""
+        keys = dict(
+            openai_api_key="k",
+            gemini_api_key="k",
+            anthropic_api_key="k",
+            xai_api_key="k",
+            zai_api_key="k",
+            deepseek_api_key="k",
+        )
+        for model in [
+            Model.gpt_6_luna,
+            Model.gemini_3_8_flash,
+            Model.claude_haiku_4_5,
+            Model.grok_4_7,
+            Model.glm_5_3,
+            Model.deepseek_flash,
+        ]:
+            with self.subTest(model=model):
+                built = create_model(model, **keys)
+                self.assertEqual(built.retries, 2)
+                self.assertTrue(built.exponential_backoff)
+
     def test_missing_key_is_a_provider_not_configured_error(self):
         from agents.model_factory import ProviderNotConfiguredError
 
@@ -162,7 +186,7 @@ class TestCreateModel(unittest.TestCase):
         mock_gemini_class.return_value = MagicMock()
         create_model("gemini-2.5-pro", gemini_api_key="test-key")
 
-        mock_gemini_class.assert_called_once_with(id="gemini-2.5-pro", api_key="test-key")
+        mock_gemini_class.assert_called_once_with(id="gemini-2.5-pro", api_key="test-key", **PROVIDER_RETRY)
 
     def test_invalid_model_string_raises(self):
         with self.assertRaises(ValueError):

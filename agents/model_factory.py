@@ -19,6 +19,16 @@ class ProviderNotConfiguredError(ValueError):
     """
 
 
+# agno retries a provider error only when told to, and leaves `retries` at 0. So a
+# transient 429/5xx - Gemini answering 503 "model is currently experiencing high demand",
+# as five Gemini 3.x models did in one integration run on 2026-09-29 - reached the
+# caller as the reply itself: HTTP 200 whose content is the provider's error JSON. agno
+# never retries 400/401/403/404/413/422 or a context-window error, so a bad key, an
+# unknown model or a Claude refusal (422, agents/claude_refusal.py) still fails at once.
+# Backoff 2s then 4s: short enough to stay inside a caller's own timeout.
+PROVIDER_RETRY: dict[str, Any] = {"retries": 2, "delay_between_retries": 2, "exponential_backoff": True}
+
+
 # Z.ai's OpenAI-compatible endpoint (docs.z.ai, "OpenAI Python SDK").
 ZAI_BASE_URL = "https://api.z.ai/api/paas/v4/"
 
@@ -73,7 +83,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens  # the Responses API's name for it
 
-        return ReasoningAwareOpenAIResponses(**kwargs)
+        return ReasoningAwareOpenAIResponses(**kwargs, **PROVIDER_RETRY)
 
     elif provider == ModelProvider.GEMINI:
         if not gemini_api_key:
@@ -85,7 +95,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens  # Gemini uses different param name
 
-        return Gemini(**kwargs)
+        return Gemini(**kwargs, **PROVIDER_RETRY)
 
     elif provider == ModelProvider.ANTHROPIC:
         # Lazy import to handle missing anthropic package gracefully. The refusal-aware
@@ -105,7 +115,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
-        return RefusalAwareClaude(**kwargs)
+        return RefusalAwareClaude(**kwargs, **PROVIDER_RETRY)
 
     elif provider == ModelProvider.XAI:
         if not xai_api_key:
@@ -119,7 +129,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
-        return xAI(**kwargs)
+        return xAI(**kwargs, **PROVIDER_RETRY)
 
     elif provider == ModelProvider.ZAI:
         if not zai_api_key:
@@ -137,7 +147,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
-        return OpenAILike(**kwargs)
+        return OpenAILike(**kwargs, **PROVIDER_RETRY)
 
     elif provider == ModelProvider.DEEPSEEK:
         if not deepseek_api_key:
@@ -149,7 +159,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
-        return DeepSeek(**kwargs)
+        return DeepSeek(**kwargs, **PROVIDER_RETRY)
 
     else:
         raise ValueError(f"Unknown model provider: {provider}")

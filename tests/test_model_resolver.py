@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from agents import Model, ModelProvider, get_provider
-from agents.model_factory import create_model
+from agents.model_factory import PROVIDER_RETRY, create_model
 from agents.model_resolver import (
     RESOLVE_TTL_SECONDS,
     RETRY_AFTER_SECONDS,
@@ -195,12 +195,12 @@ class TestAliasesAreWiredIn(unittest.TestCase):
         claude = MagicMock()
         with patch("agents.claude_refusal.RefusalAwareClaude", claude):
             create_model(Model.anthropic_sonnet_latest, anthropic_api_key="k")
-        claude.assert_called_once_with(id="claude-sonnet-5", api_key="k")
+        claude.assert_called_once_with(id="claude-sonnet-5", api_key="k", **PROVIDER_RETRY)
 
     @patch("agents.model_factory.ReasoningAwareOpenAIResponses")
     def test_create_model_accepts_a_resolved_id_not_in_the_enum(self, openai_responses):
         create_model("gpt-6-terra", openai_api_key="k")
-        openai_responses.assert_called_once_with(id="gpt-6-terra", api_key="k")
+        openai_responses.assert_called_once_with(id="gpt-6-terra", api_key="k", **PROVIDER_RETRY)
 
     def test_default_chat_model_accepts_an_alias(self):
         from agents import _default_model
