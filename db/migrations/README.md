@@ -1,6 +1,6 @@
 # Database Migrations
 
-This directory contains the database setup script for agents-gateway.
+This directory contains the database setup script for hivegate.
 
 ## Database Setup
 

@@ -1,5 +1,5 @@
 [project]
-name = "agents-gateway"
+name = "hivegate"
 dynamic = ["version"]
 requires-python = ">=3.11"
 readme = "README.md"

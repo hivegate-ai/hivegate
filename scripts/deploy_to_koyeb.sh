@@ -216,7 +216,7 @@ ENV_VARS="$ENV_VARS --env PROMPT_STORAGE_BACKEND=$PROMPT_STORAGE_BACKEND"
 [ -n "$SERVICE_PROMPTS" ] && ENV_VARS="$ENV_VARS --env SERVICE_PROMPTS=@service-prompts"
 
 # Add observability env vars (with defaults for non-secret values)
-ENV_VARS="$ENV_VARS --env OTEL_SERVICE_NAME=agents-gateway"
+ENV_VARS="$ENV_VARS --env OTEL_SERVICE_NAME=hivegate"
 ENV_VARS="$ENV_VARS --env OTEL_ENVIRONMENT=@otel-environment"
 ENV_VARS="$ENV_VARS --env OTEL_TRACING_BACKEND=$OTEL_TRACING_BACKEND"
 ENV_VARS="$ENV_VARS --env OTEL_LOGGING_BACKEND=$OTEL_LOGGING_BACKEND"
@@ -235,7 +235,7 @@ ENV_VARS="$ENV_VARS --env OTEL_TRACING_SAMPLE_RATE=1.0"
 # Deploy to Koyeb
 echo -e "\n${GREEN}Deploying to Koyeb...${NC}"
 
-SERVICE_NAME="agents-gateway"
+SERVICE_NAME="hivegate"
 
 # Check if service exists
 if koyeb services get "$SERVICE_NAME" &> /dev/null; then

@@ -28,7 +28,7 @@ What actually happened.
 
 - **OS**: [e.g., Ubuntu 22.04, macOS 14]
 - **Python Version**: [e.g., 3.11.5]
-- **Agents Gateway Version**: [e.g., 1.0.0]
+- **HiveGate Version**: [e.g., 1.0.0]
 - **Deployment**: [e.g., Docker, Cloud Run, local]
 
 ## Logs

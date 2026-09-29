@@ -95,5 +95,5 @@ We use [Semantic Versioning](https://semver.org/):
 
 ---
 
-[Unreleased]: https://github.com/anthropics/agents-gateway/compare/v0.2.1...HEAD
-[0.2.1]: https://github.com/anthropics/agents-gateway/releases/tag/v0.2.1
+[Unreleased]: https://github.com/hivegate-ai/hivegate/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/hivegate-ai/hivegate/releases/tag/v0.2.1

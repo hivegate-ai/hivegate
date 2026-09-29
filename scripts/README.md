@@ -1,6 +1,6 @@
 # Scripts
 
-This directory contains utility scripts for the agents-gateway project.
+This directory contains utility scripts for the hivegate project.
 
 ## JSONL Vector Import Tool
 

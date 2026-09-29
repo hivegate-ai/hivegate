@@ -12,7 +12,7 @@ def get_prompt_storage(db: "Session | None" = None) -> PromptStorageBackend:
 
     Environment variable PROMPT_STORAGE_BACKEND controls which backend to use:
     - "postgres" (default): Use PostgreSQL database
-    - "langsmith": Use LangSmith (requires `pip install agents-gateway[langsmith]`)
+    - "langsmith": Use LangSmith (requires `pip install hivegate[langsmith]`)
     - "service": Use external prompts service (requires SERVICE_PROMPTS env var)
 
     Args:
@@ -31,7 +31,7 @@ def get_prompt_storage(db: "Session | None" = None) -> PromptStorageBackend:
         except ImportError as e:
             raise ImportError(
                 "LangSmith storage requires additional dependencies. "
-                "Install with: pip install agents-gateway[langsmith]"
+                "Install with: pip install hivegate[langsmith]"
             ) from e
 
     if backend == "service":

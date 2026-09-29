@@ -35,7 +35,7 @@ class TestBasicFunctionality(unittest.TestCase):
         from api.settings import api_settings
 
         self.assertIsNotNone(api_settings)
-        self.assertEqual(api_settings.title, "agents-gateway")
+        self.assertEqual(api_settings.title, "hivegate")
 
     @patch("agents.agent_utils.retrieve_prompts")
     def test_agent_utils_import(self, mock_retrieve):

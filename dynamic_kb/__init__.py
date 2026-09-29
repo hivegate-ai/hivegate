@@ -5,4 +5,4 @@
 # Migration guide:
 # - Replace DynamicKnowledgeBase with agno.knowledge.Knowledge
 # - Use KnowledgeService for business logic that requires chunking
-# - See the qdrant_tests/ directory in agents-gateway-tests for examples of direct Knowledge usage
+# - See the qdrant_tests/ directory in hivegate-tests for examples of direct Knowledge usage

@@ -1,6 +1,6 @@
-# Contributing to Agents Gateway
+# Contributing to HiveGate
 
-Thank you for your interest in contributing to Agents Gateway! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to HiveGate! This document provides guidelines and instructions for contributing.
 
 ## Table of Contents
 
@@ -22,12 +22,12 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/YOUR-USERNAME/agents-gateway.git
-   cd agents-gateway
+   git clone https://github.com/YOUR-USERNAME/hivegate.git
+   cd hivegate
    ```
 3. **Add the upstream remote**:
    ```bash
-   git remote add upstream https://github.com/anthropics/agents-gateway.git
+   git remote add upstream https://github.com/hivegate-ai/hivegate.git
    ```
 
 ## Development Setup
@@ -221,8 +221,8 @@ Common scopes include:
 
 ## Questions?
 
-- Open a [GitHub Discussion](https://github.com/anthropics/agents-gateway/discussions) for questions
-- Check existing [Issues](https://github.com/anthropics/agents-gateway/issues) before reporting bugs
+- Open a [GitHub Discussion](https://github.com/hivegate-ai/hivegate/discussions) for questions
+- Check existing [Issues](https://github.com/hivegate-ai/hivegate/issues) before reporting bugs
 - Read the [documentation](docs/) for implementation details
 
 Thank you for contributing! 🎉
