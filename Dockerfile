@@ -45,5 +45,12 @@ USER ${USER}
 # Expose the port the app runs on
 EXPOSE 8080
 
+# The commit this image was built from, served by GET /_/version so a deploy can be
+# verified against the process actually answering requests, not only against Koyeb's
+# record - which can be correct while a stale sleep snapshot serves older code.
+# Build with: --build-arg GIT_SHA=$(git rev-parse HEAD)
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
 CMD ["/app/scripts/start_server.sh"]

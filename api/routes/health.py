@@ -1,4 +1,5 @@
 import logging
+import os
 
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.exc import SQLAlchemyError
@@ -51,3 +52,18 @@ def get_root():
 def get_version():
     """Return the version of the API"""
     return {"version": api_settings.version}
+
+
+@health_router.get("/_/version")
+def get_commit():
+    """The commit this *running process* was built from ($GIT_SHA, baked in at build).
+
+    Not the same question as /version, which is the app's declared version. Koyeb's
+    deployment record can name a new image while a scale-to-zero instance woken from an
+    older snapshot serves the old code - personal-finance did that on 2026-09-29, an
+    hour after a verified deploy. Only asking the process can tell, so deploys
+    (personal_finance scripts/koyeb_pin.sh) and a daily watch
+    (scripts/heal_stale_snapshot.py there) compare this with the deployed image's tag.
+    Same path and shape as personal-finance's, so one checker serves both.
+    """
+    return {"commit": os.environ.get("GIT_SHA") or "unknown"}
