@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: agents-gateway
+  name: hivegate
   labels:
-    app: agents-gateway
+    app: hivegate
 spec:
   type: ClusterIP
   ports:
@@ -12,12 +12,12 @@ spec:
       protocol: TCP
       name: http
   selector:
-    app: agents-gateway
+    app: hivegate
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: agents-gateway-ingress
+  name: hivegate-ingress
   annotations:
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
@@ -26,16 +26,16 @@ metadata:
 spec:
   tls:
     - hosts:
-        - agents-gateway.example.com
-      secretName: agents-gateway-tls
+        - hivegate.example.com
+      secretName: hivegate-tls
   rules:
-    - host: agents-gateway.example.com
+    - host: hivegate.example.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: agents-gateway
+                name: hivegate
                 port:
                   number: 80

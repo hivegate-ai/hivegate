@@ -39,13 +39,13 @@ def get_health(response: Response, db: Session = Depends(get_db)):
 @health_router.get("/status")
 def get_status():
     """Return the status of the API"""
-    return {"status": "healthy", "service": "agents-gateway"}
+    return {"status": "healthy", "service": "hivegate"}
 
 
 @health_router.get("/")
 def get_root():
     """Root endpoint that redirects to docs"""
-    return {"message": "Welcome to Agents Gateway", "docs": "/docs", "version": api_settings.version}
+    return {"message": "Welcome to HiveGate", "docs": "/docs", "version": api_settings.version}
 
 
 @health_router.get("/version")

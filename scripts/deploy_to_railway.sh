@@ -175,7 +175,7 @@ railway variables set PROMPT_STORAGE_BACKEND="$PROMPT_STORAGE_BACKEND"
 [ -n "$SERVICE_PROMPTS" ] && railway variables set SERVICE_PROMPTS="$SERVICE_PROMPTS"
 
 # Observability variables
-railway variables set OTEL_SERVICE_NAME="agents-gateway"
+railway variables set OTEL_SERVICE_NAME="hivegate"
 railway variables set OTEL_ENVIRONMENT="production"
 railway variables set OTEL_TRACING_BACKEND="$OTEL_TRACING_BACKEND"
 railway variables set OTEL_LOGGING_BACKEND="$OTEL_LOGGING_BACKEND"

@@ -1,6 +1,6 @@
 # Azure Deployment
 
-Deploy Agents Gateway to Azure Container Apps.
+Deploy HiveGate to Azure Container Apps.
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@ Deploy Agents Gateway to Azure Container Apps.
 
 ```bash
 az group create \
-  --name agents-gateway-rg \
+  --name hivegate-rg \
   --location eastus
 ```
 
@@ -22,14 +22,14 @@ az group create \
 
 ```bash
 az acr create \
-  --resource-group agents-gateway-rg \
-  --name agentsgatewayacr \
+  --resource-group hivegate-rg \
+  --name hivegateacr \
   --sku Basic
 
 # Build and push image
 az acr build \
-  --registry agentsgatewayacr \
-  --image agents-gateway:latest \
+  --registry hivegateacr \
+  --image hivegate:latest \
   --file Dockerfile .
 ```
 
@@ -38,11 +38,11 @@ az acr build \
 ```bash
 # Deploy infrastructure and application
 az deployment group create \
-  --resource-group agents-gateway-rg \
+  --resource-group hivegate-rg \
   --template-file deploy/azure/container-apps/main.bicep \
   --parameters \
     environment=dev \
-    containerImage=agentsgatewayacr.azurecr.io/agents-gateway:latest \
+    containerImage=hivegateacr.azurecr.io/hivegate:latest \
     dbConnectionString="postgresql://user:pass@host:5432/db" \
     tokenEncryptionKey="your-base64-fernet-key"
 ```
@@ -51,8 +51,8 @@ az deployment group create \
 
 ```bash
 az containerapp show \
-  --name agents-gateway-dev \
-  --resource-group agents-gateway-rg \
+  --name hivegate-dev \
+  --resource-group hivegate-rg \
   --query properties.configuration.ingress.fqdn \
   --output tsv
 ```
@@ -70,7 +70,7 @@ az containerapp show \
 │                                                              │
 │  ┌─────────────────┐    ┌─────────────────┐                 │
 │  │    Revision     │    │    Revision     │                 │
-│  │  agents-gateway │    │  agents-gateway │                 │
+│  │  hivegate       │    │  hivegate       │                 │
 │  └────────┬────────┘    └────────┬────────┘                 │
 └───────────┼──────────────────────┼──────────────────────────┘
             │                      │
@@ -118,8 +118,8 @@ scale: {
 ```bash
 # Create PostgreSQL Flexible Server
 az postgres flexible-server create \
-  --resource-group agents-gateway-rg \
-  --name agents-gateway-db \
+  --resource-group hivegate-rg \
+  --name hivegate-db \
   --location eastus \
   --admin-user agadmin \
   --admin-password 'YourSecurePassword123!' \
@@ -129,14 +129,14 @@ az postgres flexible-server create \
 
 # Create database
 az postgres flexible-server db create \
-  --resource-group agents-gateway-rg \
-  --server-name agents-gateway-db \
-  --database-name agents_gateway
+  --resource-group hivegate-rg \
+  --server-name hivegate-db \
+  --database-name hivegate
 
 # Allow Azure services
 az postgres flexible-server firewall-rule create \
-  --resource-group agents-gateway-rg \
-  --name agents-gateway-db \
+  --resource-group hivegate-rg \
+  --name hivegate-db \
   --rule-name AllowAzureServices \
   --start-ip-address 0.0.0.0 \
   --end-ip-address 0.0.0.0
@@ -158,8 +158,8 @@ Total: ~$60-70/month for development workloads.
 
 ```bash
 az containerapp logs show \
-  --name agents-gateway-dev \
-  --resource-group agents-gateway-rg \
+  --name hivegate-dev \
+  --resource-group hivegate-rg \
   --follow
 ```
 
@@ -167,7 +167,7 @@ az containerapp logs show \
 
 ```bash
 az monitor metrics list \
-  --resource /subscriptions/{sub}/resourceGroups/agents-gateway-rg/providers/Microsoft.App/containerApps/agents-gateway-dev \
+  --resource /subscriptions/{sub}/resourceGroups/hivegate-rg/providers/Microsoft.App/containerApps/hivegate-dev \
   --metric "Requests" \
   --interval PT1H
 ```
@@ -178,8 +178,8 @@ az monitor metrics list \
 
 ```bash
 az containerapp revision list \
-  --name agents-gateway-dev \
-  --resource-group agents-gateway-rg \
+  --name hivegate-dev \
+  --resource-group hivegate-rg \
   --output table
 ```
 
@@ -187,8 +187,8 @@ az containerapp revision list \
 
 ```bash
 az containerapp revision restart \
-  --name agents-gateway-dev \
-  --resource-group agents-gateway-rg \
+  --name hivegate-dev \
+  --resource-group hivegate-rg \
   --revision <revision-name>
 ```
 
@@ -196,7 +196,7 @@ az containerapp revision restart \
 
 ```bash
 az containerapp update \
-  --name agents-gateway-dev \
-  --resource-group agents-gateway-rg \
-  --image agentsgatewayacr.azurecr.io/agents-gateway:v2.0.0
+  --name hivegate-dev \
+  --resource-group hivegate-rg \
+  --image hivegateacr.azurecr.io/hivegate:v2.0.0
 ```

@@ -1,5 +1,5 @@
 """
-Test configuration and fixtures for the agents-gateway test suite.
+Test configuration and fixtures for the hivegate test suite.
 """
 
 import os

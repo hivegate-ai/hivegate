@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Renamed
+- The project is now **HiveGate** (formerly Agents Gateway), to avoid confusion with
+  the unrelated agentgateway.dev project. The repo moved to `hivegate-ai/hivegate`, the
+  site to https://hivegate.dev, and the image to `ghcr.io/hivegate-ai/hivegate`.
+  Upgrading an existing deployment:
+  - The default database name in the deploy examples is now `hivegate`. Set
+    `DB_DATABASE=agents_gateway` to keep using your existing database.
+  - The default OpenTelemetry service name is now `hivegate`. Set
+    `OTEL_SERVICE_NAME=agents-gateway` if your dashboards or alerts filter on the old name.
+  - `GET /health` now returns `"service": "hivegate"`.
+  - Pull `ghcr.io/hivegate-ai/hivegate` instead of `ghcr.io/liberzon/agents-gateway`.
+
 ### Added
 - Open source community documentation (CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md)
 - GitHub issue and PR templates
@@ -24,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Latest-of-a-tier model aliases (`anthropic:sonnet-latest`, `openai:terra-latest`, `google:flash-latest`, ...), resolved from each vendor's models API, cached daily, with a per-tier fallback; usable as a request `model` or as `DEFAULT_CHAT_MODEL`
 
 ### Changed
-- Renamed project from `agent-api` to `agents-gateway`
+- Renamed project from `agent-api` to `hivegate`
 - **BREAKING**: Renamed `org_id` parameter to `tenant_id` across Knowledge API
 - Database migrations consolidated into single `setup.sql`
 - Version handling improvements in `pyproject.toml`
@@ -65,5 +77,5 @@ Initial open source release.
 - Input validation with Pydantic models
 - SQL injection prevention via SQLAlchemy ORM
 
-[Unreleased]: https://github.com/anthropics/agents-gateway/compare/v0.2.1...HEAD
-[0.2.1]: https://github.com/anthropics/agents-gateway/releases/tag/v0.2.1
+[Unreleased]: https://github.com/hivegate-ai/hivegate/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/hivegate-ai/hivegate/releases/tag/v0.2.1

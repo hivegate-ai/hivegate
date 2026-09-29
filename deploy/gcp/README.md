@@ -1,6 +1,6 @@
 # Google Cloud Platform Deployment
 
-Deploy Agents Gateway to Google Cloud Run.
+Deploy HiveGate to Google Cloud Run.
 
 ## Prerequisites
 
@@ -15,7 +15,7 @@ Deploy Agents Gateway to Google Cloud Run.
 ```bash
 export PROJECT_ID="your-project-id"
 export REGION="us-central1"
-export SERVICE_NAME="agents-gateway"
+export SERVICE_NAME="hivegate"
 ```
 
 ### 2. Enable Required APIs
@@ -50,19 +50,19 @@ echo -n "your-base64-fernet-key" | \
 ```bash
 # Build using Cloud Build
 gcloud builds submit \
-  --tag gcr.io/$PROJECT_ID/agents-gateway:latest \
+  --tag gcr.io/$PROJECT_ID/hivegate:latest \
   --project=$PROJECT_ID
 
 # Or build locally and push
-docker build -t gcr.io/$PROJECT_ID/agents-gateway:latest .
-docker push gcr.io/$PROJECT_ID/agents-gateway:latest
+docker build -t gcr.io/$PROJECT_ID/hivegate:latest .
+docker push gcr.io/$PROJECT_ID/hivegate:latest
 ```
 
 ### 5. Deploy to Cloud Run
 
 ```bash
 gcloud run deploy $SERVICE_NAME \
-  --image gcr.io/$PROJECT_ID/agents-gateway:latest \
+  --image gcr.io/$PROJECT_ID/hivegate:latest \
   --platform managed \
   --region $REGION \
   --allow-unauthenticated \
@@ -114,7 +114,7 @@ This repository includes deployment scripts in `scripts/`:
 │                                                              │
 │  ┌─────────────────┐    ┌─────────────────┐                 │
 │  │    Instance     │    │    Instance     │                 │
-│  │  agents-gateway │    │  agents-gateway │                 │
+│  │  hivegate       │    │  hivegate       │                 │
 │  └────────┬────────┘    └────────┬────────┘                 │
 └───────────┼──────────────────────┼──────────────────────────┘
             │                      │
@@ -157,7 +157,7 @@ gcloud run services update $SERVICE_NAME \
 
 ```bash
 # Create PostgreSQL instance
-gcloud sql instances create agents-gateway-db \
+gcloud sql instances create hivegate-db \
   --database-version=POSTGRES_15 \
   --tier=db-f1-micro \
   --region=$REGION \
@@ -165,13 +165,13 @@ gcloud sql instances create agents-gateway-db \
   --project=$PROJECT_ID
 
 # Create database
-gcloud sql databases create agents_gateway \
-  --instance=agents-gateway-db \
+gcloud sql databases create hivegate \
+  --instance=hivegate-db \
   --project=$PROJECT_ID
 
 # Create user
 gcloud sql users create agadmin \
-  --instance=agents-gateway-db \
+  --instance=hivegate-db \
   --password=your-user-password \
   --project=$PROJECT_ID
 ```
@@ -180,7 +180,7 @@ gcloud sql users create agadmin \
 
 ```bash
 gcloud run services update $SERVICE_NAME \
-  --add-cloudsql-instances=$PROJECT_ID:$REGION:agents-gateway-db \
+  --add-cloudsql-instances=$PROJECT_ID:$REGION:hivegate-db \
   --region $REGION \
   --project=$PROJECT_ID
 ```
@@ -238,7 +238,7 @@ gcloud run services logs read $SERVICE_NAME \
 
 ```bash
 gcloud run deploy $SERVICE_NAME \
-  --image gcr.io/$PROJECT_ID/agents-gateway:latest \
+  --image gcr.io/$PROJECT_ID/hivegate:latest \
   --region $REGION \
   --project=$PROJECT_ID
 ```

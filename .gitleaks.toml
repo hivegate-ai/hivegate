@@ -1,7 +1,7 @@
 # Gitleaks configuration
 # https://github.com/gitleaks/gitleaks
 
-title = "Agents Gateway Gitleaks Config"
+title = "HiveGate Gitleaks Config"
 
 [extend]
 useDefault = true

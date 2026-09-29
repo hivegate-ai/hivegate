@@ -1,6 +1,6 @@
 name: Notify tests repo
 
-# Fires a repository_dispatch event at agents-gateway-tests so its
+# Fires a repository_dispatch event at hivegate-ai/tests so its
 # integration suite runs against the new main commit.
 #
 # Skipped on forks (forks don't have the TESTS_REPO_PAT secret and
@@ -13,15 +13,15 @@ on:
 
 jobs:
   trigger:
-    name: Dispatch to agents-gateway-tests
-    if: github.repository == 'liberzon/agents-gateway'
+    name: Dispatch to hivegate-ai/tests
+    if: github.repository == 'hivegate-ai/hivegate'
     runs-on: ubuntu-latest
     steps:
       - name: Send repository_dispatch
         uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.TESTS_REPO_PAT }}
-          repository: liberzon/agents-gateway-tests
+          repository: hivegate-ai/tests
           event-type: agent-api-updated
           client-payload: |
             {

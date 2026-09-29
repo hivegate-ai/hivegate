@@ -1,0 +1,47 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! First-run problems (setup, `.env`, docker compose) are especially useful right now.
+        For security issues, email security@hivegate.dev instead of opening a public issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The commands or requests that trigger it. A curl command is ideal.
+      render: sh
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server logs
+      description: Relevant lines from the server output. Remove any API keys or tokens.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: HiveGate version
+      description: The commit or release, e.g. from `GET /_/version` or `git rev-parse --short HEAD`.
+  - type: dropdown
+    id: run
+    attributes:
+      label: How are you running it?
+      options:
+        - Locally (docker compose + start_server.sh)
+        - Docker image (ghcr.io/hivegate-ai/hivegate)
+        - Render / Railway / Koyeb
+        - Kubernetes
+        - Other
+    validations:
+      required: true

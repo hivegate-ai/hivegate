@@ -523,7 +523,7 @@ def has_user_tokens_batch(db: Session, user_id: str, integration_keys: List[str]
         return {}
 
     # Query all matching tokens in one go
-    results = (
+    results: List[Any] = (
         db.query(UserTokenDB.integration_key)
         .filter(
             and_(
@@ -561,7 +561,9 @@ def get_tokens_expiring_soon(db: Session, hours_ahead: int = 1) -> List[UserToke
             and_(
                 UserTokenDB.is_active,
                 UserTokenDB.expires_at.isnot(None),
-                UserTokenDB.expires_at <= cutoff_time,
+                # Legacy Column() attributes type as Never under SQLAlchemy 2.1 (no mypy plugin),
+                # so the comparison is inferred as bool; it is a SQL expression at runtime.
+                UserTokenDB.expires_at <= cutoff_time,  # type: ignore[arg-type]
                 UserTokenDB.token_type == "oauth2",  # Only OAuth2 tokens can be refreshed
             )
         )

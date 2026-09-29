@@ -13,7 +13,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: ${DB_NAME:-postgres}
     networks:
-      - agents-gateway
+      - hivegate
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-postgres}"]
       interval: 10s
@@ -31,7 +31,7 @@ services:
     environment:
       QDRANT__SERVICE__GRPC_PORT: 6334
     networks:
-      - agents-gateway
+      - hivegate
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6333/"]
       interval: 5s
@@ -39,7 +39,7 @@ services:
       retries: 5
 
 networks:
-  agents-gateway:
+  hivegate:
 
 volumes:
   pgdata:

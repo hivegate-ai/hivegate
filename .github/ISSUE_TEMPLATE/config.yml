@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or setup help
+    url: https://github.com/hivegate-ai/hivegate/discussions/categories/q-a
+    about: Ask in Discussions; you'll usually get an answer faster there.
+  - name: Security vulnerability
+    url: https://github.com/hivegate-ai/hivegate/security/policy
+    about: Please report security issues privately. See the security policy.
+  - name: Documentation site
+    url: https://hivegate.dev/docs/
+    about: API reference, configuration and deployment guides.

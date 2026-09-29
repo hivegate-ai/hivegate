@@ -5,7 +5,7 @@ param environment string = 'dev'
 param location string = resourceGroup().location
 
 @description('Container image to deploy')
-param containerImage string = 'ghcr.io/agno-agi/agents-gateway:latest'
+param containerImage string = 'ghcr.io/hivegate-ai/hivegate:latest'
 
 @description('Database connection string')
 @secure()
@@ -21,8 +21,8 @@ param minReplicas int = 1
 @description('Maximum number of replicas')
 param maxReplicas int = 10
 
-var appName = 'agents-gateway-${environment}'
-var envName = 'agents-gateway-env-${environment}'
+var appName = 'hivegate-${environment}'
+var envName = 'hivegate-env-${environment}'
 
 // Log Analytics Workspace
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
@@ -84,7 +84,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
     template: {
       containers: [
         {
-          name: 'agents-gateway'
+          name: 'hivegate'
           image: containerImage
           resources: {
             cpu: json('0.5')

@@ -1,6 +1,6 @@
 # Contributing a New Toolkit
 
-Quick-start guide for adding a new toolkit to the agents-gateway.
+Quick-start guide for adding a new toolkit to the hivegate.
 
 ## Architecture (3 Layers)
 

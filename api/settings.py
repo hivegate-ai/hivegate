@@ -11,7 +11,7 @@ from api.services import str_to_bool
 class ApiSettings(BaseSettings):
     """Api settings that are set using environment variables."""
 
-    title: str = "agents-gateway"
+    title: str = "hivegate"
     version: str = "1.0"
 
     # Set to False to disable docs at /docs and /redoc

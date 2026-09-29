@@ -40,7 +40,7 @@ We take security seriously. If you discover a security vulnerability, please rep
 
 ## Security Best Practices
 
-When deploying Agents Gateway:
+When deploying HiveGate:
 
 1. **Environment Variables**
    - Never commit secrets to version control

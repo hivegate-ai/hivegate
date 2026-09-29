@@ -3,7 +3,7 @@
 
 services:
   - type: web
-    name: agents-gateway
+    name: hivegate
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
@@ -51,7 +51,7 @@ services:
         sync: false
       # Observability - Core Settings
       - key: OTEL_SERVICE_NAME
-        value: agents-gateway
+        value: hivegate
       - key: OTEL_ENVIRONMENT
         sync: false
       - key: OTEL_SERVICE_VERSION

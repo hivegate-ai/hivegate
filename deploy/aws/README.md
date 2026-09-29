@@ -1,6 +1,6 @@
 # AWS Deployment
 
-Deploy Agents Gateway to AWS using ECS Fargate.
+Deploy HiveGate to AWS using ECS Fargate.
 
 ## Prerequisites
 
@@ -17,18 +17,18 @@ Store your database credentials and encryption key in AWS Secrets Manager:
 ```bash
 # Create database secret
 aws secretsmanager create-secret \
-  --name agents-gateway/db \
+  --name hivegate/db \
   --secret-string '{
     "username": "your-db-user",
     "password": "your-db-password",
     "host": "your-db-host",
     "port": "5432",
-    "database": "agents_gateway"
+    "database": "hivegate"
   }'
 
 # Create encryption key secret
 aws secretsmanager create-secret \
-  --name agents-gateway/encryption-key \
+  --name hivegate/encryption-key \
   --secret-string "your-base64-fernet-key"
 ```
 
@@ -39,16 +39,16 @@ aws secretsmanager create-secret \
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com
 
 # Build and push
-docker build -t agents-gateway .
-docker tag agents-gateway:latest ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/agents-gateway:latest
-docker push ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/agents-gateway:latest
+docker build -t hivegate .
+docker tag hivegate:latest ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/hivegate:latest
+docker push ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/hivegate:latest
 ```
 
 ### 3. Deploy with CloudFormation
 
 ```bash
 aws cloudformation create-stack \
-  --stack-name agents-gateway-dev \
+  --stack-name hivegate-dev \
   --template-body file://deploy/aws/cloudformation.yaml \
   --parameters \
     ParameterKey=Environment,ParameterValue=dev \
@@ -73,7 +73,7 @@ aws cloudformation create-stack \
 │                    ECS Cluster                               │
 │  ┌─────────────────┐    ┌─────────────────┐                 │
 │  │  Fargate Task   │    │  Fargate Task   │                 │
-│  │  agents-gateway │    │  agents-gateway │                 │
+│  │  hivegate       │    │  hivegate       │                 │
 │  └────────┬────────┘    └────────┬────────┘                 │
 └───────────┼──────────────────────┼──────────────────────────┘
             │                      │
@@ -149,22 +149,22 @@ Total: ~$65-100/month for development workloads.
 ### View logs
 
 ```bash
-aws logs tail /ecs/agents-gateway-dev --follow
+aws logs tail /ecs/hivegate-dev --follow
 ```
 
 ### Check service status
 
 ```bash
 aws ecs describe-services \
-  --cluster agents-gateway-dev \
-  --services agents-gateway-dev
+  --cluster hivegate-dev \
+  --services hivegate-dev
 ```
 
 ### Force new deployment
 
 ```bash
 aws ecs update-service \
-  --cluster agents-gateway-dev \
-  --service agents-gateway-dev \
+  --cluster hivegate-dev \
+  --service hivegate-dev \
   --force-new-deployment
 ```

@@ -1,15 +1,56 @@
-# Agents Gateway
+# HiveGate
 
-**📖 Docs & landing page: [agentsgateway.dev](https://agentsgateway.dev)**
+**Run your Agno agents as a production API.**
+
+[![HiveGate](https://hivegate.dev/assets/og-image.png)](https://hivegate.dev)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![GitHub stars](https://img.shields.io/github/stars/hivegate-ai/hivegate?style=social)](https://github.com/hivegate-ai/hivegate/stargazers)
+[![CI](https://github.com/hivegate-ai/hivegate/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hivegate-ai/hivegate/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/releases/latest)
+[![Last commit](https://img.shields.io/github/last-commit/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/commits/main)
+[![Discussions](https://img.shields.io/github/discussions/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/discussions)
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template?template=https://github.com/liberzon/agents-gateway-deploy)
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/liberzon/agents-gateway-deploy)
-[![Deploy to Koyeb](https://img.shields.io/badge/Deploy%20to-Koyeb-121212?style=for-the-badge&logo=koyeb&logoColor=white)](https://app.koyeb.com/deploy?type=git&repository=github.com/liberzon/agents-gateway-deploy)
+HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/agno-agi/agno). You write the agent, and HiveGate gives it what production needs:
+- per-user sessions
+- OAuth tokens for Google and Microsoft
+- human approval for risky tool calls
+- multi-agent teams with a supervisor
+- versioned prompts
+- tracing
 
-A production-ready API gateway for serving AI agents. Built with FastAPI and [Agno 2.5.16+](https://github.com/agno-ai/agno).
+**[Website](https://hivegate.dev)** · **[Docs](https://hivegate.dev/docs/)** · **[Deploy guide](https://hivegate.dev/deploy/)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)** · **[Roadmap](https://github.com/hivegate-ai/hivegate/issues/72)**
+
+```sh
+git clone https://github.com/hivegate-ai/hivegate && cd hivegate
+cp .env.example .env    # then set GOOGLE_API_KEY and uncomment AUTH_DISABLED=true
+docker compose up -d    # Postgres + Qdrant, seeds demo agents
+./scripts/dev_setup.sh && source .venv/bin/activate && ./scripts/start_server.sh
+```
+
+See the [Quickstart](#quickstart) for the full steps.
+
+Or deploy the prebuilt image in one click:
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template?template=https://github.com/hivegate-ai/deploy)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/hivegate-ai/deploy)
+[![Deploy to Koyeb](https://img.shields.io/badge/Deploy%20to-Koyeb-121212?style=for-the-badge&logo=koyeb&logoColor=white)](https://app.koyeb.com/deploy?type=git&repository=github.com/hivegate-ai/deploy)
+
+> HiveGate is not a request-routing API gateway like Kong. It runs AI agents and exposes them over a REST API.
+
+## Why HiveGate, and when you don't need it
+
+[Agno](https://github.com/agno-agi/agno) gives you the agent itself: model calls, tools, memory and teams. Its own [AgentOS](https://docs.agno.com/agent-os/introduction) can also serve agents over HTTP, with sessions, human approval, RBAC and tracing. **If your agents are defined in code and AgentOS covers what you need, use AgentOS.**
+
+HiveGate is for when your agents act *for your users*, in their own accounts, and are managed as data rather than code:
+
+- **Per-user OAuth tokens.** Store each user's Google or Microsoft tokens once. HiveGate refreshes them, and the Gmail, Calendar, Contacts and Drive toolkits act as that user.
+- **Approval before risky actions.** A tool call such as sending an email pauses the run until someone approves or denies it through the API.
+- **Agents, prompts and skills as data.** Create and version them through the REST API, with no redeploy.
+- **Per-tenant knowledge.** Documents are kept per tenant and per collection in Qdrant.
+- **Supervisor teams with container workers.** Jobs run in Docker or Kubernetes, including Claude Code and managed-agent workers.
+- **A ready-to-deploy service.** A prebuilt image with one-click deploys to Render, Railway and Koyeb, plus Kubernetes and cloud manifests.
 
 ## Features
 
@@ -27,47 +68,50 @@ A production-ready API gateway for serving AI agents. Built with FastAPI and [Ag
 
 > Prerequisites: [Docker Desktop](https://www.docker.com/products/docker-desktop) installed and running, Python 3.11+.
 
-### 1. Clone and start
+### 1. Clone and configure
 
 ```sh
-git clone <repository-url>
-cd agents-gateway
+git clone https://github.com/hivegate-ai/hivegate
+cd hivegate
+cp .env.example .env
+```
 
+Edit `.env` **before starting the server**. The server reads it once at startup, so a key exported in another terminal won't reach it.
+
+- Set at least one model provider key. The demo agents use Gemini by default, so set `GOOGLE_API_KEY`. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, `ZAI_API_KEY` and `DEEPSEEK_API_KEY` also work.
+- For local use, uncomment `AUTH_DISABLED=true` so you can call the API without creating an API key first. Never enable it on a deployment other people can reach.
+
+The database settings in `.env.example` already match the Postgres that Docker Compose starts.
+
+### 2. Start
+
+```sh
 # Start PostgreSQL + Qdrant (seeds demo agents automatically)
 docker compose up -d
 
-# Set up Python environment
+# Set up the Python environment
 ./scripts/dev_setup.sh && source .venv/bin/activate
 
 # Start the API server
 ./scripts/start_server.sh
 ```
 
-### 2. Explore
+### 3. Explore
 
 ```sh
 # API docs (interactive)
 open http://localhost:8000/docs
 
-# List demo agents (no API key needed with AUTH_DISABLED=true)
+# List demo agents (works without an API key because of AUTH_DISABLED=true)
 curl http://localhost:8000/v2/agents
 
 # Get a specific agent
 curl http://localhost:8000/v2/agents/demo-assistant
 ```
 
-### 3. Chat with an agent
-
-Set at least one model provider API key, then chat:
+### 4. Chat with an agent
 
 ```sh
-export GOOGLE_API_KEY="your-google-api-key"       # Gemini (default)
-# export OPENAI_API_KEY="your-openai-api-key"     # OpenAI (GPT)
-# export ANTHROPIC_API_KEY="your-anthropic-api-key"  # Anthropic (Claude)
-# export XAI_API_KEY="your-xai-api-key"              # xAI (Grok)
-# export ZAI_API_KEY="your-zai-api-key"              # Z.ai (GLM)
-# export DEEPSEEK_API_KEY="your-deepseek-api-key"    # DeepSeek
-
 curl -X POST http://localhost:8000/v2/agents/demo-assistant/chat \
   -H "Content-Type: application/json" \
   -d '{
@@ -80,32 +124,9 @@ curl -X POST http://localhost:8000/v2/agents/demo-assistant/chat \
   }'
 ```
 
-#### Choosing a model
+If the reply mentions an invalid API key, check the model key in `.env` and restart the server. To pick a different model, see [Choosing a model](#choosing-a-model).
 
-A chat request may name a `model`; otherwise the gateway uses `DEFAULT_CHAT_MODEL`
-(env), else `gemini-3-flash-preview`. Besides pinned ids (`claude-sonnet-4-6`,
-`gpt-5.4`, ...), `model` accepts a **latest-of-a-tier alias** that follows the vendor's
-newest model in that tier without a code change, and never moves to a pricier tier:
-
-| Vendor | Aliases |
-|---|---|
-| Anthropic | `anthropic:haiku-latest`, `anthropic:sonnet-latest`, `anthropic:opus-latest` |
-| OpenAI | `openai:luna-latest`, `openai:terra-latest`, `openai:sol-latest`, `openai:astra-latest` |
-| Google | `google:flash-lite-latest`, `google:flash-latest`, `google:pro-latest` |
-| xAI | `xai:grok-latest` |
-
-Z.ai GLM models (`glm-5.3`, `glm-5.3-flashx`, `glm-5.3-flash`, `glm-5.2`) are pinned ids only - Z.ai
-documents no model-listing endpoint to resolve an alias against. DeepSeek has two:
-`deepseek-flash` (itself a moving name, now V4.1-Flash) and `deepseek-v4-pro`. OpenAI models run
-on the Responses API: GPT-6 calls tools on Chat Completions only with reasoning off.
-
-The gateway resolves an alias by listing the vendor's models through its SDK and
-taking the newest one in the tier (`agents/model_resolver.py`), caches the answer
-for a day, and falls back to a known model for the tier if the vendor can't be
-asked. The resolution is logged (`Model alias anthropic:sonnet-latest -> ...`).
-For example, `DEFAULT_CHAT_MODEL=anthropic:sonnet-latest`.
-
-### 4. Stop services
+### 5. Stop services
 
 ```sh
 docker compose down        # Keep data
@@ -115,7 +136,7 @@ docker compose down -v     # Reset everything
 ## Project Structure
 
 ```
-agents-gateway/
+hivegate/
 ├── api/                    # FastAPI application
 │   ├── routes/v2/          # V2 API endpoints (agents, teams, knowledge, tokens,
 │   │                       #   prompts, skills, approvals, engines, targets)
@@ -167,6 +188,31 @@ curl -H "X-Admin-Secret: your-secret" http://localhost:8000/admin/api-keys
 ```
 
 **Development**: Set `AUTH_DISABLED=true` to bypass authentication.
+
+## Choosing a model
+
+A chat request may name a `model`; otherwise the gateway uses `DEFAULT_CHAT_MODEL`
+(env), else `gemini-3-flash-preview`. Besides pinned ids (`claude-sonnet-4-6`,
+`gpt-5.4`, ...), `model` accepts a **latest-of-a-tier alias** that follows the vendor's
+newest model in that tier without a code change, and never moves to a pricier tier:
+
+| Vendor | Aliases |
+|---|---|
+| Anthropic | `anthropic:haiku-latest`, `anthropic:sonnet-latest`, `anthropic:opus-latest` |
+| OpenAI | `openai:luna-latest`, `openai:terra-latest`, `openai:sol-latest`, `openai:astra-latest` |
+| Google | `google:flash-lite-latest`, `google:flash-latest`, `google:pro-latest` |
+| xAI | `xai:grok-latest` |
+
+Z.ai GLM models (`glm-5.3`, `glm-5.3-flashx`, `glm-5.3-flash`, `glm-5.2`) are pinned ids only - Z.ai
+documents no model-listing endpoint to resolve an alias against. DeepSeek has two:
+`deepseek-flash` (itself a moving name, now V4.1-Flash) and `deepseek-v4-pro`. OpenAI models run
+on the Responses API: GPT-6 calls tools on Chat Completions only with reasoning off.
+
+The gateway resolves an alias by listing the vendor's models through its SDK and
+taking the newest one in the tier (`agents/model_resolver.py`), caches the answer
+for a day, and falls back to a known model for the tier if the vendor can't be
+asked. The resolution is logged (`Model alias anthropic:sonnet-latest -> ...`).
+For example, `DEFAULT_CHAT_MODEL=anthropic:sonnet-latest`.
 
 ## Toolkits
 
@@ -225,9 +271,9 @@ pytest tests/v2/
 
 | Platform | Configuration | Script |
 |----------|---------------|--------|
-| [Railway](https://railway.app/template?template=https://github.com/liberzon/agents-gateway-deploy) | `railway.toml` | `scripts/deploy_to_railway.sh` |
-| [Render](https://render.com/deploy?repo=https://github.com/liberzon/agents-gateway-deploy) | `render.yaml` | `scripts/deploy_to_render.sh` |
-| [Koyeb](https://app.koyeb.com/deploy?type=git&repository=github.com/liberzon/agents-gateway-deploy) | `koyeb.yaml` | `scripts/deploy_to_koyeb.sh` |
+| [Railway](https://railway.app/template?template=https://github.com/hivegate-ai/deploy) | `railway.toml` | `scripts/deploy_to_railway.sh` |
+| [Render](https://render.com/deploy?repo=https://github.com/hivegate-ai/deploy) | `render.yaml` | `scripts/deploy_to_render.sh` |
+| [Koyeb](https://app.koyeb.com/deploy?type=git&repository=github.com/hivegate-ai/deploy) | `koyeb.yaml` | `scripts/deploy_to_koyeb.sh` |
 
 ### Cloud Platforms
 
@@ -299,7 +345,7 @@ OTEL_OTLP_ENDPOINT=http://collector:4317
 ## Support
 
 - [Agno Documentation](https://docs.agno.com)
-- [Report an Issue](https://github.com/liberzon/agents-gateway/issues)
+- [Report an Issue](https://github.com/hivegate-ai/hivegate/issues)
 
 ## License
 
