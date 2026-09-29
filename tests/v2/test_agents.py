@@ -374,7 +374,7 @@ class TestV2AgentsAPI(unittest.TestCase):
 
             # Create a mock for the async arun method
             async def mock_arun(*args, **kwargs):
-                from agno.models.metrics import Metrics
+                from agno.metrics import RunMetrics as Metrics
 
                 # Create a mock response object with all required attributes
                 mock_response = MagicMock()
@@ -560,7 +560,7 @@ class TestV2AgentsAPI(unittest.TestCase):
 
         # Mock acontinue_run
         async def mock_acontinue_run(*args, **kwargs):
-            from agno.models.metrics import Metrics
+            from agno.metrics import RunMetrics as Metrics
 
             mock_response = MagicMock()
             mock_response.content = "Meeting scheduled successfully"
@@ -795,7 +795,7 @@ class TestV2AgentsAPI(unittest.TestCase):
             mock_agent_instance = MagicMock()
 
             async def mock_arun(*args, **kwargs):
-                from agno.models.metrics import Metrics
+                from agno.metrics import RunMetrics as Metrics
 
                 mock_response = MagicMock()
                 mock_response.content = "Hello"
@@ -1252,7 +1252,7 @@ class TestV2AgentsAPI(unittest.TestCase):
         mock_agent_instance.model = {"id": "gemini-2.5-pro"}
 
         async def mock_acontinue_run(*args, **kwargs):
-            from agno.models.metrics import Metrics
+            from agno.metrics import RunMetrics as Metrics
 
             mock_response = MagicMock()
             mock_response.content = "Meeting scheduled with edited details"
@@ -1328,7 +1328,7 @@ class TestV2AgentsAPI(unittest.TestCase):
         mock_agent_instance.model = {"id": "gemini-2.5-pro"}
 
         async def mock_acontinue_run(*args, **kwargs):
-            from agno.models.metrics import Metrics
+            from agno.metrics import RunMetrics as Metrics
 
             mock_response = MagicMock()
             mock_response.content = "I understand you don't want to schedule that meeting."
