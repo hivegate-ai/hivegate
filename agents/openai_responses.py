@@ -19,6 +19,8 @@ from dataclasses import dataclass
 
 from agno.models.openai import OpenAIResponses
 
+from agents.provider_models import StreamRestartGuard
+
 _REASONING_GPT = re.compile(r"^gpt-(\d+)")
 
 
@@ -30,6 +32,12 @@ def is_reasoning_model_id(model_id: str) -> bool:
 
 
 @dataclass
-class ReasoningAwareOpenAIResponses(OpenAIResponses):
+class ReasoningAwareOpenAIResponses(StreamRestartGuard, OpenAIResponses):
     def _using_reasoning_model(self) -> bool:
         return is_reasoning_model_id(self.id)
+
+
+# agno/reasoning/openai.py recognises an OpenAI reasoning model by class *name*
+# ("OpenAIResponses"); keep it, as agents/claude_refusal.py does for Claude.
+ReasoningAwareOpenAIResponses.__name__ = "OpenAIResponses"
+ReasoningAwareOpenAIResponses.__qualname__ = "OpenAIResponses"

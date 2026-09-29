@@ -8,7 +8,7 @@ from agents.model_factory import PROVIDER_RETRY, create_model
 class TestCreateModel(unittest.TestCase):
     """Test cases for the create_model() factory function."""
 
-    @patch("agents.model_factory.Gemini")
+    @patch("agents.model_factory.GuardedGemini")
     def test_create_gemini_model(self, mock_gemini_class):
         mock_gemini_class.return_value = MagicMock()
         result = create_model(Model.gemini_2_5_pro, gemini_api_key="test-key")
@@ -16,7 +16,7 @@ class TestCreateModel(unittest.TestCase):
         mock_gemini_class.assert_called_once_with(id="gemini-2.5-pro", api_key="test-key", **PROVIDER_RETRY)
         self.assertEqual(result, mock_gemini_class.return_value)
 
-    @patch("agents.model_factory.Gemini")
+    @patch("agents.model_factory.GuardedGemini")
     def test_create_gemini_with_max_tokens_uses_max_output_tokens(self, mock_gemini_class):
         mock_gemini_class.return_value = MagicMock()
         create_model(Model.gemini_2_5_flash, gemini_api_key="test-key", max_tokens=1000)
@@ -164,7 +164,7 @@ class TestCreateModel(unittest.TestCase):
             create_model(Model.claude_opus_4_6)
         self.assertIn("Anthropic", str(ctx.exception))
 
-    @patch("agents.model_factory.Gemini")
+    @patch("agents.model_factory.GuardedGemini")
     def test_temperature_passthrough(self, mock_gemini_class):
         mock_gemini_class.return_value = MagicMock()
         create_model(Model.gemini_2_5_pro, gemini_api_key="test-key", temperature=0.7)
@@ -172,7 +172,7 @@ class TestCreateModel(unittest.TestCase):
         call_kwargs = mock_gemini_class.call_args[1]
         self.assertEqual(call_kwargs["temperature"], 0.7)
 
-    @patch("agents.model_factory.Gemini")
+    @patch("agents.model_factory.GuardedGemini")
     def test_no_optional_params_when_none(self, mock_gemini_class):
         mock_gemini_class.return_value = MagicMock()
         create_model(Model.gemini_2_5_pro, gemini_api_key="test-key")
@@ -181,7 +181,7 @@ class TestCreateModel(unittest.TestCase):
         self.assertNotIn("temperature", call_kwargs)
         self.assertNotIn("max_output_tokens", call_kwargs)
 
-    @patch("agents.model_factory.Gemini")
+    @patch("agents.model_factory.GuardedGemini")
     def test_string_to_enum_conversion(self, mock_gemini_class):
         mock_gemini_class.return_value = MagicMock()
         create_model("gemini-2.5-pro", gemini_api_key="test-key")
@@ -202,7 +202,7 @@ class TestCreateModel(unittest.TestCase):
                 create_model(model, openai_api_key="test-key")
                 mock_openai_class.assert_called_once()
 
-    @patch("agents.model_factory.Gemini")
+    @patch("agents.model_factory.GuardedGemini")
     def test_all_gemini_models_create_gemini(self, mock_gemini_class):
         mock_gemini_class.return_value = MagicMock()
         gemini_models = [m for m in Model.__members__.values() if m.value.startswith("gemini-")]

@@ -1,13 +1,9 @@
 from typing import Any, Optional, Union
 
-from agno.models.deepseek import DeepSeek
-from agno.models.google import Gemini
-from agno.models.openai.like import OpenAILike
-from agno.models.xai import xAI
-
 from agents import Model, ModelProvider, get_provider
 from agents.model_resolver import resolve_model_id
 from agents.openai_responses import ReasoningAwareOpenAIResponses
+from agents.provider_models import GuardedDeepSeek, GuardedGemini, GuardedOpenAILike, GuardedXAI
 
 
 class ProviderNotConfiguredError(ValueError):
@@ -25,7 +21,9 @@ class ProviderNotConfiguredError(ValueError):
 # caller as the reply itself: HTTP 200 whose content is the provider's error JSON. agno
 # never retries 400/401/403/404/413/422 or a context-window error, so a bad key, an
 # unknown model or a Claude refusal (422, agents/claude_refusal.py) still fails at once.
-# Backoff 2s then 4s: short enough to stay inside a caller's own timeout.
+# Backoff 2s then 4s: short enough to stay inside a caller's own timeout. The classes
+# built here make that safe (agents/provider_models.py): a stream is retried only before
+# its first chunk, and a billing error is never retried.
 PROVIDER_RETRY: dict[str, Any] = {"retries": 2, "delay_between_retries": 2, "exponential_backoff": True}
 
 
@@ -82,6 +80,11 @@ def create_model(
             kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens  # the Responses API's name for it
+        # Chat Completions stored nothing by default; agno's Responses class would set
+        # store=True for every reasoning model and chain turns through OpenAI-held state.
+        # store=False keeps conversations off OpenAI's servers, as before: agno then
+        # replays the encrypted reasoning items itself.
+        kwargs["store"] = False
 
         return ReasoningAwareOpenAIResponses(**kwargs, **PROVIDER_RETRY)
 
@@ -95,7 +98,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens  # Gemini uses different param name
 
-        return Gemini(**kwargs, **PROVIDER_RETRY)
+        return GuardedGemini(**kwargs, **PROVIDER_RETRY)
 
     elif provider == ModelProvider.ANTHROPIC:
         # Lazy import to handle missing anthropic package gracefully. The refusal-aware
@@ -129,7 +132,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
-        return xAI(**kwargs, **PROVIDER_RETRY)
+        return GuardedXAI(**kwargs, **PROVIDER_RETRY)
 
     elif provider == ModelProvider.ZAI:
         if not zai_api_key:
@@ -147,7 +150,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
-        return OpenAILike(**kwargs, **PROVIDER_RETRY)
+        return GuardedOpenAILike(**kwargs, **PROVIDER_RETRY)
 
     elif provider == ModelProvider.DEEPSEEK:
         if not deepseek_api_key:
@@ -159,7 +162,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
-        return DeepSeek(**kwargs, **PROVIDER_RETRY)
+        return GuardedDeepSeek(**kwargs, **PROVIDER_RETRY)
 
     else:
         raise ValueError(f"Unknown model provider: {provider}")

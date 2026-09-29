@@ -200,7 +200,7 @@ class TestAliasesAreWiredIn(unittest.TestCase):
     @patch("agents.model_factory.ReasoningAwareOpenAIResponses")
     def test_create_model_accepts_a_resolved_id_not_in_the_enum(self, openai_responses):
         create_model("gpt-6-terra", openai_api_key="k")
-        openai_responses.assert_called_once_with(id="gpt-6-terra", api_key="k", **PROVIDER_RETRY)
+        openai_responses.assert_called_once_with(id="gpt-6-terra", api_key="k", store=False, **PROVIDER_RETRY)
 
     def test_default_chat_model_accepts_an_alias(self):
         from agents import _default_model
