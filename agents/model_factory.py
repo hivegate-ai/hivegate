@@ -64,9 +64,11 @@ def create_model(
         return Gemini(**kwargs)
 
     elif provider == ModelProvider.ANTHROPIC:
-        # Lazy import to handle missing anthropic package gracefully
+        # Lazy import to handle missing anthropic package gracefully. The refusal-aware
+        # subclass raises on a safety refusal that agno would otherwise turn into an
+        # empty reply - see agents/claude_refusal.py.
         try:
-            from agno.models.anthropic import Claude
+            from agents.claude_refusal import RefusalAwareClaude
         except ImportError as e:
             raise ImportError("anthropic package is not installed. Install it with: pip install anthropic") from e
 
@@ -79,7 +81,7 @@ def create_model(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
-        return Claude(**kwargs)
+        return RefusalAwareClaude(**kwargs)
 
     else:
         raise ValueError(f"Unknown model provider: {provider}")

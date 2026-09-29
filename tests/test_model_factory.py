@@ -43,16 +43,20 @@ class TestCreateModel(unittest.TestCase):
         self.assertIn("max_tokens", call_kwargs)
         self.assertEqual(call_kwargs["max_tokens"], 2000)
 
-    @patch("agents.model_factory.Claude", create=True)
-    def test_create_anthropic_model(self, mock_claude_class):
-        mock_claude_class.return_value = MagicMock()
-        with patch("agents.model_factory.ModelProvider") as mock_provider:
-            mock_provider.ANTHROPIC = "anthropic"
-            # Need to patch the lazy import inside create_model
-            with patch.dict("sys.modules", {"agno.models.anthropic": MagicMock(Claude=mock_claude_class)}):
-                result = create_model(Model.claude_sonnet_4_6, anthropic_api_key="test-key")
+    def test_create_anthropic_model(self):
+        """Claude ids get the refusal-aware subclass, not agno's bare Claude.
 
-        self.assertIsNotNone(result)
+        Constructing the model makes no network call, so this uses the real class
+        rather than mocking it out - a mock here would keep passing if the factory
+        quietly went back to returning plain Claude, which silently swallows refusals.
+        """
+        from agents.claude_refusal import RefusalAwareClaude
+
+        result = create_model(Model.claude_sonnet_4_6, anthropic_api_key="test-key", max_tokens=1234)
+
+        self.assertIsInstance(result, RefusalAwareClaude)
+        self.assertEqual(result.id, "claude-sonnet-4-6")
+        self.assertEqual(result.max_tokens, 1234)
 
     def test_missing_gemini_api_key_raises(self):
         with self.assertRaises(ValueError) as ctx:
