@@ -41,9 +41,14 @@ class TestResolverFallbacksAreRealModels(unittest.TestCase):
             with self.subTest(alias=alias):
                 self.assertIn(alias, values)
 
-    def test_every_anthropic_member_has_a_known_provider(self):
-        """get_provider() must not raise on anything this enum accepts."""
-        for model in Model:
+    def test_every_member_has_a_known_provider(self):
+        """get_provider() must not raise on anything this enum accepts.
+
+        Iterates `__members__.values()` rather than the class: both are correct,
+        but CodeQL's py/non-iterable-in-for-loop does not model `EnumMeta.__iter__`
+        and reports `for model in Model:` as an error, which blocks the merge.
+        """
+        for model in Model.__members__.values():
             with self.subTest(model=model.value):
                 self.assertIsInstance(get_provider(model), ModelProvider)
 
