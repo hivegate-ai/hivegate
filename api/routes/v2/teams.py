@@ -8,7 +8,10 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from agno.db.postgres import PostgresDb
 from agno.memory import MemoryManager
 from agno.models.google import Gemini
-from agno.models.metrics import Metrics
+
+# agno.models.metrics.Metrics was only a backward-compat alias of RunMetrics, and
+# agno 3 removed it. RunMetrics lives in agno.metrics from 2.6 through 3.x.
+from agno.metrics import RunMetrics as Metrics
 from agno.team import Team, TeamMode
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse

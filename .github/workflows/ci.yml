@@ -45,13 +45,13 @@ jobs:
           uv pip install ruff==0.15.14 mypy
 
       - name: Check formatting with ruff
-        run: uv run ruff format . --check
+        run: uv run --no-sync ruff format . --check
 
       - name: Lint with ruff
-        run: uv run ruff check .
+        run: uv run --no-sync ruff check .
 
       - name: Type-check with mypy
-        run: uv run mypy .
+        run: uv run --no-sync mypy .
 
   test:
     name: Test (Python ${{ matrix.python-version }})
@@ -88,7 +88,7 @@ jobs:
           TESTING: "true"
           OPENAI_API_KEY: "test-key"
         run: |
-          uv run pytest tests/ \
+          uv run --no-sync pytest tests/ \
             --cov=api --cov=agents --cov=db \
             --cov-report=xml \
             --cov-report=term-missing \
