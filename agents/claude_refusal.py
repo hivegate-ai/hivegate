@@ -96,3 +96,14 @@ class RefusalAwareClaude(Claude):
         if isinstance(e, ModelRefusalError):
             raise e
         super()._handle_api_error(e)
+
+
+# agno recognises Claude for its native-thinking reasoning path by class *name*:
+# `reasoning_model.__class__.__name__ == "Claude"` in agno/reasoning/anthropic.py (2.6.20
+# and 3.0.11 alike - the only name check in agno). Under its own name this subclass fails
+# it, so an agent that configured `thinking` to reason natively would silently fall back
+# to agno's manual chain-of-thought step - the very call Sonnet 5.5 refuses as
+# reasoning_extraction. Presenting as "Claude" keeps agno's behaviour identical to the
+# class it extends; isinstance checks were never affected.
+RefusalAwareClaude.__name__ = "Claude"
+RefusalAwareClaude.__qualname__ = "Claude"

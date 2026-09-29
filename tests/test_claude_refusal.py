@@ -110,6 +110,34 @@ class ErrorHandlerTest(unittest.TestCase):
         self.assertNotIsInstance(caught.exception, ModelRefusalError)
 
 
+class NativeReasoningDetectionTest(unittest.TestCase):
+    """The subclass must not change which reasoning path agno picks.
+
+    agno detects a native-thinking Claude by `__class__.__name__ == "Claude"`. Under its
+    own name RefusalAwareClaude failed that, so configuring `thinking` would silently
+    route reasoning through agno's manual chain-of-thought - the call Sonnet 5.5 refuses.
+    """
+
+    def test_presents_as_claude(self):
+        self.assertEqual("Claude", model().__class__.__name__)
+
+    def test_agno_detects_native_thinking_when_configured(self):
+        from unittest.mock import patch
+
+        import agno.reasoning.anthropic as agno_anthropic
+
+        thinking = RefusalAwareClaude(id=MODEL_ID, api_key="test-key", max_tokens=8192, thinking={"type": "adaptive"})
+        # agno 3.x also asks the Anthropic API whether the model can think; None means
+        # "unknown" and defers to the configuration. Keep the test offline.
+        with patch.object(agno_anthropic, "_api_thinking_supported", return_value=None, create=True):
+            self.assertTrue(agno_anthropic.is_anthropic_reasoning_model(thinking))
+
+    def test_without_thinking_it_is_still_not_native(self):
+        import agno.reasoning.anthropic as agno_anthropic
+
+        self.assertFalse(agno_anthropic.is_anthropic_reasoning_model(model()))
+
+
 class _FakeStream:
     """Stands in for AsyncAnthropic().messages.stream(...): yields message_stop only."""
 
