@@ -18,9 +18,8 @@ class ApiSettings(BaseSettings):
     docs_enabled: bool = True
 
     # Cors origin list to allow requests from.
-    # This list is set using the set_cors_origin_list validator
-    # which uses the runtime_env variable to set the
-    # default cors origin list.
+    # The set_cors_origin_list validator adds http://localhost and http://localhost:3000
+    # to the configured origins and de-duplicates the list.
     cors_origin_list: List[str] = Field(default_factory=list)
 
     # Qdrant vector database URL (optional)
