@@ -19,6 +19,14 @@ updates:
       # newer pydantic-core.
       - dependency-name: "pydantic-core"
         update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      # google-genai 2.25 caps websockets<17, so a websockets major bump
+      # cannot resolve. Remove once google-genai allows websockets 17.
+      - dependency-name: "websockets"
+        update-types: ["version-update:semver-major"]
+      # qdrant-client 1.19 caps portalocker<4, so a portalocker major bump
+      # cannot resolve. Remove once qdrant-client allows portalocker 4.
+      - dependency-name: "portalocker"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps"
     labels:
