@@ -348,6 +348,8 @@ HiveGate is built in the open, and these people have contributed to it:
 
 - [@cestercian](https://github.com/cestercian) — documented `DEFAULT_CHAT_MODEL` (#76), the
   project's first outside contribution
+- [@rathi-mohit](https://github.com/rathi-mohit) — corrected the `cors_origin_list`
+  documentation (#101)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
