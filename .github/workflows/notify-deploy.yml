@@ -41,6 +41,6 @@ jobs:
             {
               "project": "hivegate",
               "ref": "${{ github.sha }}",
-              "latest": true,
+              "latest": ${{ github.ref == 'refs/heads/main' }},
               "trigger_deploy": false
             }
