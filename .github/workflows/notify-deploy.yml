@@ -1,0 +1,46 @@
+name: Notify deploy repo
+
+# Fires a repository_dispatch event at hivegate-ai/deploy so it builds and
+# publishes an image of the new main commit (ghcr.io/hivegate-ai/hivegate, tagged
+# latest). Build only: it asks for no deployment.
+#
+# Skipped on forks, and a no-op until the DEPLOY_REPO_PAT secret is set (a token
+# allowed to dispatch to hivegate-ai/deploy: contents read/write there).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    name: Dispatch to hivegate-ai/deploy
+    if: github.repository == 'hivegate-ai/hivegate'
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_REPO_PAT: ${{ secrets.DEPLOY_REPO_PAT }}
+    steps:
+      - name: Check token
+        id: token
+        run: |
+          if [ -z "$DEPLOY_REPO_PAT" ]; then
+            echo "::notice::DEPLOY_REPO_PAT is not set - not dispatching a build of ${GITHUB_SHA}"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Send repository_dispatch
+        if: steps.token.outputs.present == 'true'
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: ${{ secrets.DEPLOY_REPO_PAT }}
+          repository: hivegate-ai/deploy
+          event-type: upstream-release
+          client-payload: |
+            {
+              "project": "hivegate",
+              "ref": "${{ github.sha }}",
+              "latest": true,
+              "trigger_deploy": false
+            }
