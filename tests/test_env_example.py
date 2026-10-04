@@ -28,6 +28,8 @@ def test_env_example_covers_api_settings():
     field_to_env = {
         "gemini_api_key": "GOOGLE_API_KEY",
         "agent_debug_mode": "TESTING",
+        # see #82
+        "cors_origin_list": "CORS_ORIGIN_LIST",
     }
 
     # These fields are handled internally and do not directly read
@@ -35,7 +37,6 @@ def test_env_example_covers_api_settings():
     ignored_fields = {
         "title",
         "version",
-        "cors_origin_list",
     }
 
     missing = []
@@ -52,7 +53,4 @@ def test_env_example_covers_api_settings():
         if expected_env_key not in env_keys:
             missing.append(expected_env_key)
 
-    assert not missing, (
-        "ApiSettings environment variables missing from .env.example: "
-        + ", ".join(sorted(missing))
-    )
+    assert not missing, "ApiSettings environment variables missing from .env.example: " + ", ".join(sorted(missing))
