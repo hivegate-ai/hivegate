@@ -350,6 +350,8 @@ HiveGate is built in the open, and these people have contributed to it:
   project's first outside contribution
 - [@rathi-mohit](https://github.com/rathi-mohit) — corrected the `cors_origin_list`
   documentation (#101)
+- [@shashank1027](https://github.com/shashank1027) — added a test that keeps `.env.example`
+  in sync with `ApiSettings` (#103)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
