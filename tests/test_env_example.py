@@ -27,7 +27,7 @@ def test_env_example_covers_api_settings():
     # environment-variable name.
     field_to_env = {
         "gemini_api_key": "GOOGLE_API_KEY",
-        "agent_debug_mode": "TESTING", # see #82
+        "agent_debug_mode": "TESTING",  # see #82
     }
 
     # These fields are handled internally and do not directly read
