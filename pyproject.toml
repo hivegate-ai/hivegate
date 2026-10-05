@@ -6,9 +6,9 @@ readme = "README.md"
 authors = [{ name = "Agno", email = "hello@agno.com" }]
 
 dependencies = [
-  "agno[mcp]>=3.0.11",
+  "agno[mcp]>=3.1.0",
   "fastapi[standard]",
-  "google-genai>=1.72.0",
+  "google-genai>=2.27.0",
   "google-cloud-storage",
   "pgvector",
   "psycopg[binary]",
@@ -27,13 +27,13 @@ dependencies = [
   "python-docx==1.2.0",
   "aiofiles>=25.1.0",
   "beautifulsoup4==4.15.0",
-  "cryptography>=48.0.1",
+  "cryptography>=50.0.2",
   "httpx>=0.24.0",
   "pyyaml>=6.0",
   "dateparser",
   "types-dateparser",
-  "openai>=3.20.0",
-  "anthropic>=1.9.0",
+  "openai>=3.23.0",
+  "anthropic>=1.11.0",
   "Pillow>=12.2.0",
   "prompt-toolkit>=3.0.43",
   # Observability - OpenTelemetry (CNCF standard)
