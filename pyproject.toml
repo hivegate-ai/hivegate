@@ -55,7 +55,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["mypy", "ruff", "types-requests", "types-cachetools"]
 test = ["pytest", "pytest-asyncio", "pytest-cov", "httpx", "coverage", "testcontainers", "requests"]
-langsmith = ["langsmith>=0.14.1", "langchain-core>=1.6.5"]
+langsmith = ["langsmith>=0.14.3", "langchain-core>=1.6.5"]
 
 [build-system]
 requires = ["setuptools>=84.0.0", "setuptools-scm>=10.3.4"]
