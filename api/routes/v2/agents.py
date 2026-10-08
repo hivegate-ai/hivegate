@@ -14,7 +14,6 @@ from agno.media import Image
 
 # agno.models.metrics.Metrics was only a backward-compat alias of RunMetrics, and
 # agno 3 removed it. RunMetrics lives in agno.metrics from 2.6 through 3.x.
-from agno.metrics import RunMetrics as Metrics
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from google import genai
@@ -30,7 +29,9 @@ from agents.agent import slug_to_table_name
 from agents.model_factory import ProviderNotConfiguredError
 from agents.model_resolver import resolve_model_id
 from agents.v2_selector import _get_prompt_from_local_storage
+from api.services import usage as usage_service
 from api.services.access_token import fetch_access_token, has_access_tokens_batch  # noqa: F401
+from api.services.auth import get_api_key
 from api.services.models import PullPromptResponse
 from api.services.prompts_client import prompts_client
 from api.settings import api_settings
@@ -47,7 +48,7 @@ from db.agent_info_crud import (
     get_all_agent_info,
     soft_delete_agent_info,
 )
-from db.db_models import TokenUsage
+from db.db_models import ApiKeyDB
 from db.session import get_db
 
 # Agent caching infrastructure
@@ -189,77 +190,9 @@ def compute_cache_key(prompt_template: str, agent_id: str, model: Model, user_id
     return f"{crc32_hash}:{agent_id}:{resolve_model_id(model)}:{user_id}:{session_id}"
 
 
-def store_token_usage(
-    agent: Agent,
-    input_text: str,
-    output_text: str,
-    metrics: Optional[Metrics] = None,
-    db: Optional[Session] = None,
-) -> None:
-    """
-    Store token usage information in the database.
-
-    Args:
-        agent: The agent instance that processed the request
-        input_text: The input text (prompt)
-        output_text: The output text (completion)
-        metrics: Optional Metrics object from Agno containing token counts
-        db: Database session
-
-    Returns:
-        None
-    """
-    if not db:
-        logging.warning("No database session provided, skipping token usage storage")
-        return
-
-    if metrics and metrics.total_tokens > 0:
-        logging.info(
-            f"Token usage - Input: {metrics.total_tokens}, Output: {metrics.output_tokens}, Total: {metrics.total_tokens}"
-        )
-
-        # Store token usage in database using Agno 2.x Metrics dataclass
-        prompt_tokens = metrics.input_tokens
-        completion_tokens = metrics.output_tokens
-        total_tokens = metrics.total_tokens
-
-        token_usage = TokenUsage(
-            agent_id=agent.id,  # type: ignore[attr-defined]
-            session_id=agent.session_id,
-            user_id=agent.user_id,
-            model=agent.model.id if hasattr(agent, "model") and agent.model else None,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            is_estimated=False,
-        )
-        db.add(token_usage)
-        db.commit()
-        logging.debug(f"Token usage data stored in database for session {agent.session_id}")
-    elif output_text:
-        # Estimate tokens if metrics are not available
-        prompt_tokens = estimate_tokens(input_text)
-        completion_tokens = estimate_tokens(output_text)
-        total_tokens = prompt_tokens + completion_tokens
-
-        logging.info(
-            f"Estimated token usage - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}"
-        )
-
-        # Store estimated token usage in database
-        token_usage = TokenUsage(
-            agent_id=agent.id,  # type: ignore[attr-defined]
-            session_id=agent.session_id,
-            user_id=agent.user_id,
-            model=agent.model.id if hasattr(agent, "model") and agent.model else None,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            is_estimated=True,
-        )
-        db.add(token_usage)
-        db.commit()
-        logging.debug(f"Estimated token usage data stored in database for session {agent.session_id}")
+# Every model call is metered by api/services/usage.py: one priced token_usage row per
+# run, failed runs included. Module-level so tests can patch it.
+record_usage = usage_service.record
 
 
 def upload_file_to_google(content_bytes: bytes, mime_type: str) -> File:
@@ -655,7 +588,11 @@ class ClearSessionResponse(BaseModel):
 
 
 async def commit_response_streamer_v2(
-    agent: Agent, body: CommitRequest, cached_run: Any, db: Session = Depends(get_db)
+    agent: Agent,
+    body: CommitRequest,
+    cached_run: Any,
+    db: Session = Depends(get_db),
+    usage_ctx: Optional[usage_service.UsageContext] = None,
 ) -> AsyncGenerator:
     """
     Stream agent responses for commit/continue run chunk by chunk.
@@ -679,7 +616,11 @@ async def commit_response_streamer_v2(
     )  # type: ignore[misc]
     chunk_count = 0
     full_output_text = ""
-    last_metrics = None
+    collector = usage_service.UsageCollector(
+        usage_ctx or usage_service.context_for(getattr(agent, "id", None), body, kind="commit")
+    )
+    collector.set_model(*usage_service.model_of(agent))
+    collector.input_text = "[commit continuation]"
 
     try:
         async for chunk in run_response:
@@ -689,16 +630,13 @@ async def commit_response_streamer_v2(
 
             # Convert chunk to dict
             event_data = _event_to_dict(chunk)
+            collector.observe(event_data)
 
-            # Accumulate text and keep track of the latest metrics
-            if "content" in event_data:
-                # Only text content is part of the answer. Reasoning (and some other)
-                # events can carry a dict `content`; str-concatenating those raised
-                # "can only concatenate str (not dict) to str" and aborted the stream.
-                if isinstance(event_data["content"], str):
-                    full_output_text += event_data["content"]
-                if "metrics" in event_data:
-                    last_metrics = Metrics(**event_data["metrics"])
+            # Only text content is part of the answer. Reasoning (and some other)
+            # events can carry a dict `content`; str-concatenating those raised
+            # "can only concatenate str (not dict) to str" and aborted the stream.
+            if isinstance(event_data.get("content"), str):
+                full_output_text += event_data["content"]
 
             # Process tools using shared helper function
             _process_tools_in_event(event_data)
@@ -708,6 +646,7 @@ async def commit_response_streamer_v2(
     except Exception as e:
         # Log the error and send error event to client
         logging.error(f"Error during streaming commit response: {type(e).__name__}: {str(e)}")
+        collector.fail(f"{type(e).__name__}: {e}")
         error_data = {
             "status": "error",
             "error": f"Streaming error: {type(e).__name__}: {str(e)}",
@@ -715,15 +654,8 @@ async def commit_response_streamer_v2(
         }
         yield _format_sse_event("error", error_data)
     finally:
-        # Store token usage after all chunks are processed (or on error)
-        if full_output_text or last_metrics:
-            store_token_usage(
-                agent=agent,
-                input_text="[commit continuation]",
-                output_text=full_output_text,
-                metrics=last_metrics,
-                db=db,
-            )
+        # Meter the run after all chunks are processed (or on error) - failed runs are billed too
+        await record_usage(collector)
         logging.debug(f"Completed v2 streaming commit response with {chunk_count} chunks")
 
         # Clean up run cache
@@ -731,7 +663,12 @@ async def commit_response_streamer_v2(
             del _run_cache[body.run_id]
 
 
-async def chat_response_streamer_v2(agent: Agent, body: ChatRequest, db: Session = Depends(get_db)) -> AsyncGenerator:
+async def chat_response_streamer_v2(
+    agent: Agent,
+    body: ChatRequest,
+    db: Session = Depends(get_db),
+    usage_ctx: Optional[usage_service.UsageContext] = None,
+) -> AsyncGenerator:
     """
     Stream agent responses chunk by chunk (v2 implementation).
 
@@ -808,7 +745,9 @@ async def chat_response_streamer_v2(agent: Agent, body: ChatRequest, db: Session
     )  # type: ignore[call-overload]
     chunk_count = 0
     full_output_text = ""
-    last_metrics = None
+    collector = usage_service.UsageCollector(usage_ctx or usage_service.context_for(getattr(agent, "id", None), body))
+    collector.set_model(*usage_service.model_of(agent))
+    collector.input_text = body.message
 
     try:
         async for chunk in run_response:
@@ -818,16 +757,13 @@ async def chat_response_streamer_v2(agent: Agent, body: ChatRequest, db: Session
 
             # Convert chunk to dict
             event_data = _event_to_dict(chunk)
+            collector.observe(event_data)
 
-            # Accumulate text and keep track of the latest metrics
-            if "content" in event_data:
-                # Only text content is part of the answer. Reasoning (and some other)
-                # events can carry a dict `content`; str-concatenating those raised
-                # "can only concatenate str (not dict) to str" and aborted the stream.
-                if isinstance(event_data["content"], str):
-                    full_output_text += event_data["content"]
-                if "metrics" in event_data:
-                    last_metrics = Metrics(**event_data["metrics"])
+            # Only text content is part of the answer. Reasoning (and some other)
+            # events can carry a dict `content`; str-concatenating those raised
+            # "can only concatenate str (not dict) to str" and aborted the stream.
+            if isinstance(event_data.get("content"), str):
+                full_output_text += event_data["content"]
 
             # Cache the run for later commit if run_id is present
             if "run_id" in event_data and event_data["run_id"]:
@@ -841,6 +777,7 @@ async def chat_response_streamer_v2(agent: Agent, body: ChatRequest, db: Session
     except Exception as e:
         # Log the error and send error event to client
         logging.error(f"Error during streaming response: {type(e).__name__}: {str(e)}")
+        collector.fail(f"{type(e).__name__}: {e}")
         error_data = {
             "status": "error",
             "error": f"Streaming error: {type(e).__name__}: {str(e)}",
@@ -848,15 +785,18 @@ async def chat_response_streamer_v2(agent: Agent, body: ChatRequest, db: Session
         }
         yield _format_sse_event("error", error_data)
     finally:
-        # Store token usage after all chunks are processed (or on error)
-        if full_output_text or last_metrics:
-            store_token_usage(
-                agent=agent, input_text=body.message, output_text=full_output_text, metrics=last_metrics, db=db
-            )
+        # Meter the run after all chunks are processed (or on error) - failed runs are billed too
+        await record_usage(collector)
         logging.debug(f"Completed v2 streaming response with {chunk_count} chunks")
 
 
-async def _mcp_chat_streamer(build_agent_fn, mcp_toolkits, body: "ChatRequest", db: Session) -> AsyncGenerator:
+async def _mcp_chat_streamer(
+    build_agent_fn,
+    mcp_toolkits,
+    body: "ChatRequest",
+    db: Session,
+    usage_ctx: Optional[usage_service.UsageContext] = None,
+) -> AsyncGenerator:
     """Stream an MCP-tool agent: connect the MCP session(s), build the agent with the
     connected toolkits, then delegate to chat_response_streamer_v2. The AsyncExitStack
     stays open for the whole stream because this generator runs after the route returns.
@@ -878,7 +818,7 @@ async def _mcp_chat_streamer(build_agent_fn, mcp_toolkits, body: "ChatRequest", 
                 {"status": "error", "error": "MCP tool server unavailable"},
             )
             return
-        async for event in chat_response_streamer_v2(agent, body, db):
+        async for event in chat_response_streamer_v2(agent, body, db, usage_ctx):
             yield event
 
 
@@ -923,7 +863,12 @@ async def get_agent(
 
 
 @v2_agents_router.post("/{agent_id}/chat", status_code=status.HTTP_200_OK)
-async def chat_with_agent_v2(agent_id: str, body: ChatRequest, db: Session = Depends(get_db)):
+async def chat_with_agent_v2(
+    agent_id: str,
+    body: ChatRequest,
+    db: Session = Depends(get_db),
+    api_key: Optional[ApiKeyDB] = Depends(get_api_key),
+):
     """
     Chat with a specific agent using the v2 API with toolkit support.
 
@@ -935,6 +880,8 @@ async def chat_with_agent_v2(agent_id: str, body: ChatRequest, db: Session = Dep
     Returns:
         Either a streaming response or a complete ChatResponse with optional paused status
     """
+    # Who is calling, for the per-call cost record (api/services/usage.py).
+    usage_ctx = usage_service.context_for(agent_id, body, api_key)
     try:
         logging.info(f"Creating v2 chat request for agent_id: {agent_id}")
         logging.debug(f"ChatRequest: {body}")
@@ -968,7 +915,7 @@ async def chat_with_agent_v2(agent_id: str, body: ChatRequest, db: Session = Dep
             if body.stream:
                 logging.info(f"Returning v2 streaming response (MCP) for agent: {agent_id}")
                 return StreamingResponse(
-                    _mcp_chat_streamer(_build_mcp_agent, mcp_toolkits, body, db),
+                    _mcp_chat_streamer(_build_mcp_agent, mcp_toolkits, body, db, usage_ctx),
                     media_type="text/event-stream",
                 )
 
@@ -996,7 +943,17 @@ async def chat_with_agent_v2(agent_id: str, body: ChatRequest, db: Session = Dep
                         "locale": body.locale,
                     },
                 }
-                response = await mcp_agent.arun(body.message, stream=False, **run_config)
+                collector = usage_service.UsageCollector(usage_ctx)
+                collector.set_model(*usage_service.model_of(mcp_agent))
+                collector.input_text = body.message
+                try:
+                    response = await mcp_agent.arun(body.message, stream=False, **run_config)
+                except Exception as e:
+                    collector.fail(f"{type(e).__name__}: {e}")
+                    await record_usage(collector)
+                    raise
+                collector.observe_response(response)
+                token_usage = await record_usage(collector)
                 if hasattr(response, "run_id") and response.run_id:
                     _run_cache[response.run_id] = response
                 tools_dict = []
@@ -1011,19 +968,12 @@ async def chat_with_agent_v2(agent_id: str, body: ChatRequest, db: Session = Dep
                                 "result": _parse_result(getattr(tool, "result", None)),
                             }
                         )
-                if hasattr(response, "content"):
-                    store_token_usage(
-                        agent=mcp_agent,
-                        input_text=body.message,
-                        output_text=response.content,
-                        metrics=response.metrics if hasattr(response, "metrics") else None,
-                        db=db,
-                    )
                 return ChatResponse(
                     content=response.content if hasattr(response, "content") else None,
                     agent_id=agent_id,
                     session_id=body.session_id,
                     model=body.model,
+                    token_usage=token_usage,
                     status=response.status,
                     run_id=response.run_id if hasattr(response, "run_id") else None,
                     tools=tools_dict,
@@ -1050,7 +1000,7 @@ async def chat_with_agent_v2(agent_id: str, body: ChatRequest, db: Session = Dep
         if body.stream:
             logging.info(f"Returning v2 streaming response for agent: {agent_id}")
             return StreamingResponse(
-                chat_response_streamer_v2(agent, body, db),
+                chat_response_streamer_v2(agent, body, db, usage_ctx),
                 media_type="text/event-stream",
             )
         else:
@@ -1112,14 +1062,24 @@ async def chat_with_agent_v2(agent_id: str, body: ChatRequest, db: Session = Dep
                 "session_state": session_state,
             }
 
-            response = await agent.arun(
-                body.message,
-                images=image_objects if image_objects else None,
-                files=file_objects if file_objects else None,
-                stream=False,
-                **run_config,
-            )  # type: ignore[call-overload]
+            collector = usage_service.UsageCollector(usage_ctx)
+            collector.set_model(*usage_service.model_of(agent))
+            collector.input_text = body.message
+            try:
+                response = await agent.arun(
+                    body.message,
+                    images=image_objects if image_objects else None,
+                    files=file_objects if file_objects else None,
+                    stream=False,
+                    **run_config,
+                )  # type: ignore[call-overload]
+            except Exception as e:
+                collector.fail(f"{type(e).__name__}: {e}")
+                await record_usage(collector)
+                raise
             logging.debug(f"Completed v2 non-streaming request for agent: {agent_id}")
+            collector.observe_response(response)
+            token_usage = await record_usage(collector)
 
             # Cache the run for later commit
             if hasattr(response, "run_id") and response.run_id:
@@ -1138,22 +1098,12 @@ async def chat_with_agent_v2(agent_id: str, body: ChatRequest, db: Session = Dep
                     }
                     tools_dict.append(tool_dict)
 
-            # Log and store token usage information
-            if hasattr(response, "content"):
-                metrics = response.metrics if hasattr(response, "metrics") else None
-                store_token_usage(
-                    agent=agent,
-                    input_text=body.message,
-                    output_text=response.content,  # type: ignore[arg-type]
-                    metrics=metrics,  # type: ignore[arg-type]
-                    db=db,
-                )
-
             return ChatResponse(
                 content=response.content if hasattr(response, "content") else None,  # type: ignore[arg-type]
                 agent_id=agent_id,
                 session_id=body.session_id,
                 model=body.model,
+                token_usage=token_usage,
                 status=response.status,
                 run_id=response.run_id if hasattr(response, "run_id") else None,  # type: ignore[arg-type]
                 tools=tools_dict,
@@ -1356,7 +1306,12 @@ async def delete_agent_v2(agent_id: str, db: Session = Depends(get_db)):
 
 
 @v2_agents_router.post("/{agent_id}/chat/commit", status_code=status.HTTP_200_OK)
-async def commit_agent_chat_v2(agent_id: str, body: CommitRequest, db: Session = Depends(get_db)):
+async def commit_agent_chat_v2(
+    agent_id: str,
+    body: CommitRequest,
+    db: Session = Depends(get_db),
+    api_key: Optional[ApiKeyDB] = Depends(get_api_key),
+):
     """
     Resume a paused agent run with confirmed/edited tools.
 
@@ -1435,30 +1390,28 @@ async def commit_agent_chat_v2(agent_id: str, body: CommitRequest, db: Session =
         if body.stream:
             logging.info(f"Returning v2 streaming response for commit: {body.run_id}")
             return StreamingResponse(
-                commit_response_streamer_v2(agent, body, cached_run, db),
+                commit_response_streamer_v2(
+                    agent, body, cached_run, db, usage_service.context_for(agent_id, body, api_key, kind="commit")
+                ),
                 media_type="text/event-stream",
             )
         else:
-            response = await agent.acontinue_run(
-                run_id=body.run_id, requirements=requirements_for(cached_run, cached_run.tools), stream=False
-            )
+            collector = usage_service.UsageCollector(usage_service.context_for(agent_id, body, api_key, kind="commit"))
+            collector.set_model(*usage_service.model_of(agent))
+            collector.input_text = "[commit continuation]"
+            try:
+                response = await agent.acontinue_run(
+                    run_id=body.run_id, requirements=requirements_for(cached_run, cached_run.tools), stream=False
+                )
+            except Exception as e:
+                collector.fail(f"{type(e).__name__}: {e}")
+                await record_usage(collector)
+                raise
             logging.debug(f"Completed commit request for agent: {agent_id}")
 
-            # Extract token usage metrics
-            token_usage = None
-            if hasattr(response, "metrics") and response.metrics:
-                token_usage = response.metrics.to_dict()
-
-            # Log and store token usage information
-            if hasattr(response, "content"):
-                metrics = response.metrics if hasattr(response, "metrics") else None
-                store_token_usage(
-                    agent=agent,
-                    input_text="[commit continuation]",
-                    output_text=response.content,  # type: ignore[arg-type]
-                    metrics=metrics,  # type: ignore[arg-type]
-                    db=db,
-                )
+            # Metered like every run; the summary (tokens, cost) goes back to the caller.
+            collector.observe_response(response)
+            token_usage = await record_usage(collector)
 
             # Clean up run cache
             if body.run_id in _run_cache:

@@ -139,6 +139,7 @@ def create_app() -> FastAPI:
     from api.observability.instrumentation import setup_auto_instrumentation
     from api.routes.admin import admin_router
     from api.routes.health import health_router
+    from api.routes.usage import usage_router
     from api.settings import api_settings
 
     logging.info("Creating FastAPI app with lifespan")
@@ -169,6 +170,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(admin_router)
+    app.include_router(usage_router)
 
     logging.info("Loaded routes:")
     for route in app.routes:

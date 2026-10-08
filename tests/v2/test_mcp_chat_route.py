@@ -6,7 +6,7 @@ empty-toolset guard, and that non-MCP agents bypass the MCP path entirely.
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from db.db_models import AgentInfoDB
 from tests.test_utils import create_test_client
@@ -40,7 +40,7 @@ def _patches():
     """Common patch stack for the chat route (prompt fetch + db lookup + token store)."""
     return (
         patch.dict("os.environ", {"PROMPT_STORAGE_BACKEND": "service"}),
-        patch("api.routes.v2.agents.store_token_usage", return_value=None),
+        patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock, return_value=None),
         patch("api.routes.v2.agents.prompts_client"),
         patch("api.routes.v2.agents.get_agent_info"),
     )

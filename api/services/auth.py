@@ -146,6 +146,23 @@ def require_scopes(required_scopes: List[str]):
     return scope_validator
 
 
+async def reject_usage_only_keys(api_key: Optional[ApiKeyDB] = Depends(get_api_key)) -> None:
+    """Keep read-only usage keys (scopes == ["usage:read"]) off the agent routes.
+
+    /v2 checks only that a key is valid, not its scopes, so without this a key minted
+    for the usage dashboard could call agents and spend tokens. Keys with no scopes, or
+    with any other scope, are unaffected.
+    """
+    if api_key is None:
+        return
+    scopes = get_api_key_scopes(api_key)
+    if scopes and set(scopes) <= {"usage:read"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This API key can only read usage (/usage); it cannot call agents",
+        )
+
+
 # Pre-built scope validators for common use cases
 require_read = require_scopes(["read"])
 require_write = require_scopes(["write"])

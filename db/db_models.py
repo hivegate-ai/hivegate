@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from sqlalchemy import ARRAY, Boolean, Column, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ARRAY, Boolean, Column, DateTime, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase
 
@@ -96,6 +96,26 @@ class TokenUsage(Base):
     total_tokens = Column(Integer)
     is_estimated = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    # Cost metering (db/migrations/011_token_usage_cost.sql; api/services/usage.py)
+    run_id = Column(String, nullable=True)
+    api_key_id = Column(Integer, nullable=True)
+    api_key_name = Column(String, nullable=True)
+    tenant_id = Column(String, nullable=True)
+    request_model = Column(String, nullable=True)
+    provider = Column(String, nullable=True)
+    cache_read_tokens = Column(Integer, nullable=False, default=0)
+    cache_write_tokens = Column(Integer, nullable=False, default=0)
+    reasoning_tokens = Column(Integer, nullable=False, default=0)
+    model_requests = Column(Integer, nullable=False, default=0)
+    tool_calls = Column(Integer, nullable=False, default=0)
+    duration_ms = Column(Integer, nullable=True)
+    ttft_ms = Column(Integer, nullable=True)
+    cost_usd = Column(Numeric(12, 6), nullable=True)
+    unpriced_models = Column(ARRAY(String), nullable=True)  # type: ignore[var-annotated]
+    prices_version = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="completed")
+    error = Column(Text, nullable=True)
+    breakdown = Column(JSONB, nullable=True)
 
 
 class KnowledgeEntryDB(Base):
