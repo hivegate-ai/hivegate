@@ -1,3 +1,4 @@
+import copy
 from typing import Any, Optional, Union
 
 from agents import Model, ModelProvider, get_provider
@@ -25,6 +26,22 @@ class ProviderNotConfiguredError(ValueError):
 # built here make that safe (agents/provider_models.py): a stream is retried only before
 # its first chunk, and a billing error is never retried.
 PROVIDER_RETRY: dict[str, Any] = {"retries": 2, "delay_between_retries": 2, "exponential_backoff": True}
+
+# Anthropic prompt caching. Every model round trip re-sends the tools, the system prompt
+# and the whole conversation so far; cached, those bill at 0.1x the input price instead
+# of 1x (writes at 1.25x). Two breakpoints:
+# - cache_system_prompt marks the system prompt, which caches tools + system together
+#   (they render first). The gateway passes a fixed per-agent system message, so this
+#   prefix is shared by every run of an agent.
+# - the top-level cache_control is Anthropic's automatic caching: it marks the last
+#   block and moves forward as the conversation grows, so each tool-loop round trip and
+#   each follow-up turn reads everything before it from cache.
+# Both use the 5-minute TTL; a read refreshes it. Prompts under the model's minimum
+# (1024 tokens on Sonnet 4.6, 4096 on Haiku 4.5) are simply not cached - no error.
+ANTHROPIC_PROMPT_CACHING: dict[str, Any] = {
+    "cache_system_prompt": True,
+    "request_params": {"cache_control": {"type": "ephemeral"}},
+}
 
 
 # Z.ai's OpenAI-compatible endpoint (docs.z.ai, "OpenAI Python SDK").
@@ -112,7 +129,7 @@ def create_model(
         if not anthropic_api_key:
             raise ProviderNotConfiguredError("Anthropic API key is required for Claude models")
 
-        kwargs = {"id": model_id, "api_key": anthropic_api_key}
+        kwargs = {"id": model_id, "api_key": anthropic_api_key, **copy.deepcopy(ANTHROPIC_PROMPT_CACHING)}
         if temperature is not None:
             kwargs["temperature"] = temperature
         if max_tokens is not None:
