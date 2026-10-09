@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from agents import Model, ModelProvider, get_provider
-from agents.model_factory import PROVIDER_RETRY, create_model
+from agents.model_factory import ANTHROPIC_PROMPT_CACHING, PROVIDER_RETRY, create_model
 from agents.model_resolver import (
     RESOLVE_TTL_SECONDS,
     RETRY_AFTER_SECONDS,
@@ -195,7 +195,7 @@ class TestAliasesAreWiredIn(unittest.TestCase):
         claude = MagicMock()
         with patch("agents.claude_refusal.RefusalAwareClaude", claude):
             create_model(Model.anthropic_sonnet_latest, anthropic_api_key="k")
-        claude.assert_called_once_with(id="claude-sonnet-5", api_key="k", **PROVIDER_RETRY)
+        claude.assert_called_once_with(id="claude-sonnet-5", api_key="k", **ANTHROPIC_PROMPT_CACHING, **PROVIDER_RETRY)
 
     @patch("agents.model_factory.ReasoningAwareOpenAIResponses")
     def test_create_model_accepts_a_resolved_id_not_in_the_enum(self, openai_responses):
