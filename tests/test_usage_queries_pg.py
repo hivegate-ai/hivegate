@@ -116,6 +116,39 @@ def test_rows_round_trip_and_every_query_runs(session_factory):
         db.close()
 
 
+def test_a_partially_priced_call_is_counted_so_the_total_reads_as_a_floor(session_factory):
+    """A priced main model with an unpriced memory model has a cost_usd - only its priced
+    part. Counted as unpriced_calls (cost_usd IS NULL) it would vanish, and the summed
+    cost would look complete when it is only a lower bound."""
+    from api.services import usage
+    from db import usage_queries as q
+
+    row = _run(
+        "partial-agent",
+        "acme",
+        {
+            "input_tokens": 1_000_000,
+            "details": {
+                "model": [{"id": "claude-sonnet-5-5", "input_tokens": 1_000_000}],
+                "memory_model": [{"id": "no-such-model-x", "input_tokens": 1_000}],
+            },
+        },
+    )
+    assert row["cost_usd"] is not None and row["unpriced_models"] == ["no-such-model-x"]
+
+    db = session_factory()
+    try:
+        before = q.totals(db, "24h")
+        assert usage.write_row(row, session_factory=session_factory)
+        after = q.totals(db, "24h")
+        assert after["partially_priced_calls"] == before["partially_priced_calls"] + 1
+        assert after["unpriced_calls"] == before["unpriced_calls"]
+        partial = {g["key"]: g for g in q.summary(db, "24h", "agent")}["partial-agent"]
+        assert partial["partially_priced_calls"] == 1 and partial["unpriced_calls"] == 0
+    finally:
+        db.close()
+
+
 def test_old_rows_still_read(session_factory):
     from db import usage_queries as q
 

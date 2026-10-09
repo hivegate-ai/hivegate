@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 import logging
@@ -643,6 +644,11 @@ async def commit_response_streamer_v2(
 
             yield _format_sse_event("message", event_data)
 
+    except (asyncio.CancelledError, GeneratorExit):
+        # The client hung up mid-stream. Record the run as cancelled, not completed:
+        # its final metrics never arrived (api/services/usage.py, disconnect()).
+        collector.disconnect()
+        raise
     except Exception as e:
         # Log the error and send error event to client
         logging.error(f"Error during streaming commit response: {type(e).__name__}: {str(e)}")
@@ -654,8 +660,10 @@ async def commit_response_streamer_v2(
         }
         yield _format_sse_event("error", error_data)
     finally:
-        # Meter the run after all chunks are processed (or on error) - failed runs are billed too
-        await record_usage(collector)
+        # Meter the run after all chunks are processed, on error, or on a disconnect -
+        # failed and abandoned runs are billed too. Shielded: after a disconnect the
+        # stream's cancel scope would otherwise cancel this write as well.
+        await usage_service.shielded(record_usage(collector))
         logging.debug(f"Completed v2 streaming commit response with {chunk_count} chunks")
 
         # Clean up run cache
@@ -774,6 +782,11 @@ async def chat_response_streamer_v2(
 
             yield _format_sse_event("message", event_data)
 
+    except (asyncio.CancelledError, GeneratorExit):
+        # The client hung up mid-stream. Record the run as cancelled, not completed:
+        # its final metrics never arrived (api/services/usage.py, disconnect()).
+        collector.disconnect()
+        raise
     except Exception as e:
         # Log the error and send error event to client
         logging.error(f"Error during streaming response: {type(e).__name__}: {str(e)}")
@@ -785,8 +798,10 @@ async def chat_response_streamer_v2(
         }
         yield _format_sse_event("error", error_data)
     finally:
-        # Meter the run after all chunks are processed (or on error) - failed runs are billed too
-        await record_usage(collector)
+        # Meter the run after all chunks are processed, on error, or on a disconnect -
+        # failed and abandoned runs are billed too. Shielded: after a disconnect the
+        # stream's cancel scope would otherwise cancel this write as well.
+        await usage_service.shielded(record_usage(collector))
         logging.debug(f"Completed v2 streaming response with {chunk_count} chunks")
 
 

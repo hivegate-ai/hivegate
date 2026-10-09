@@ -123,6 +123,36 @@ def test_unpriced_models_are_listed_and_cost_is_null():
     assert row["cost_usd"] is None and row["unpriced_models"] == ["gemini-3-flash-preview"]
 
 
+def test_a_disconnect_after_the_run_finished_leaves_it_completed():
+    c = collector()
+    c.observe(completed({"input_tokens": 10, "output_tokens": 2}))
+    c.disconnect()  # the client only missed the tail of the stream
+    assert (c.status, c.error) == ("completed", None)
+
+
+def test_a_disconnect_mid_run_is_cancelled_and_names_the_request_in_flight():
+    c = collector()
+    c.observe({"event": "ModelRequestStarted"})
+    c.observe({"event": "ModelRequestCompleted", "model": "claude-sonnet-5-5", "input_tokens": 30})
+    c.observe({"event": "ModelRequestStarted"})
+    c.disconnect()
+    assert c.status == "cancelled" and c.in_flight() == 1
+    assert "1 model request(s) in flight" in c.error
+    assert c.build_row(AT)["prompt_tokens"] == 30
+
+
+def test_a_disconnect_during_the_first_request_still_leaves_a_row():
+    """The prompt reached the provider and is billed even though nothing came back -
+    so this is an estimated row, not no row at all."""
+    c = collector()
+    c.input_text = "x" * 400
+    c.observe({"event": "ModelRequestStarted"})
+    c.disconnect()
+    row = c.build_row(AT)
+    assert row is not None
+    assert (row["status"], row["is_estimated"], row["prompt_tokens"]) == ("cancelled", True, 100)
+
+
 def test_non_streaming_response():
     c = collector()
     response = SimpleNamespace(

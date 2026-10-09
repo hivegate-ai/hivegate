@@ -17,10 +17,16 @@ Why it is built like this:
     its own price (agents/pricing.py).
   - Writing never blocks the event loop (thread pool, own session) and never fails the
     caller's request.
+  - A client that hangs up mid-stream still gets its run recorded, as `cancelled`. The
+    server cancels the stream through an anyio cancel scope, where every later await
+    raises again - including the write in the streamer's `finally` - so streamers wrap
+    it in `shielded()`. Tokens of a model request still in flight at the disconnect are
+    unknown; the row says so rather than presenting a partial count as complete.
 """
 
 from __future__ import annotations
 
+import asyncio
 import collections
 import logging
 import time
@@ -104,7 +110,9 @@ class UsageCollector:
         self.request_tokens: Dict[str, int] = collections.defaultdict(int)
         self.request_models: Dict[Tuple[str, str], Dict[str, int]] = {}
         self.model_requests = 0
+        self.requests_started = 0
         self.tool_calls = 0
+        self.finished = False  # a top-level RunCompleted / RunError / RunCancelled arrived
         self.status = "completed"
         self.error: Optional[str] = None
         self.output_text = ""
@@ -136,7 +144,9 @@ class UsageCollector:
         if metrics and (top_level or not self._top_level_metrics):
             self.metrics = metrics
             self._top_level_metrics = self._top_level_metrics or top_level
-        if kind == "ModelRequestCompleted":
+        if kind == "ModelRequestStarted":
+            self.requests_started += 1
+        elif kind == "ModelRequestCompleted":
             self.model_requests += 1
             model = event.get("model") or ""
             provider = event.get("model_provider") or ""
@@ -148,14 +158,17 @@ class UsageCollector:
         elif kind == "ToolCallStarted":
             self.tool_calls += 1
         elif kind == "RunCompleted" and top_level:
+            self.finished = True
             if isinstance(event.get("content"), str) and not self.output_text:
                 self.output_text = event["content"]
         elif kind == "RunError" and top_level:
+            self.finished = True
             text = str(event.get("content") or event.get("error") or "run error")
             self.fail(text, refused="refusal" in text.lower())
         elif kind == "RunPaused":
             self.status = "paused"
         elif kind == "RunCancelled" and top_level:
+            self.finished = True
             self.status = "cancelled"
 
     def observe_response(self, response: Any) -> None:
@@ -183,6 +196,25 @@ class UsageCollector:
     def fail(self, error: str, refused: bool = False) -> None:
         self.status = "refused" if refused else "error"
         self.error = (error or "")[:ERROR_MAX]
+
+    def in_flight(self) -> int:
+        """Model requests that started but never reported their tokens."""
+        return max(self.requests_started - self.model_requests, 0)
+
+    def disconnect(self) -> None:
+        """The client went away before the run finished (the stream was cancelled).
+
+        The run is recorded as `cancelled`, not `completed`: its final metrics never
+        arrived, so its counts are only the model requests that had already completed,
+        and a request still in flight was billed by the provider for tokens nobody saw.
+        """
+        if self.finished or self.status != "completed":
+            return  # the run had already ended; the client only missed the tail
+        self.status = "cancelled"
+        pending = self.in_flight()
+        self.error = "client disconnected before the run finished" + (
+            f"; {pending} model request(s) in flight, their tokens are not counted" if pending else ""
+        )
 
     def set_model(self, model_id: Optional[str], provider: Optional[str] = None) -> None:
         """The agent's main model, used when the run carried no per-model details."""
@@ -215,8 +247,11 @@ class UsageCollector:
         entries = self._entries()
         estimated = False
         if not entries:
-            if not self.output_text:
+            if not self.output_text and not self.in_flight():
                 return None  # nothing ran (e.g. an MCP connect failure)
+            # Nothing was reported. Either the run gave no metrics, or the client hung
+            # up while the first model request was in flight - its prompt was still
+            # sent, so record an estimate rather than no row at all.
             estimated = True
             entries = [
                 (
@@ -288,6 +323,25 @@ def estimate_tokens(text: Optional[str]) -> int:
 
 
 # -- writing ------------------------------------------------------------------------
+
+# Writes started by shielded(), kept referenced until they finish so they aren't
+# garbage-collected mid-flight.
+_background: set = set()
+
+
+async def shielded(awaitable: Any) -> Any:
+    """Await `awaitable` in its own task, so cancelling the caller can't cancel it.
+
+    For the usage write in a streamer's `finally`: when the client disconnects, the
+    server cancels the stream through an anyio cancel scope, and every await inside a
+    cancelled scope raises again - so a plain `await record(...)` there loses the row.
+    Here the write carries on in the background; the caller still sees the
+    cancellation and unwinds as it should.
+    """
+    task = asyncio.ensure_future(awaitable)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+    return await asyncio.shield(task)
 
 
 def write_row(row: Dict[str, Any], session_factory=None) -> Optional[int]:

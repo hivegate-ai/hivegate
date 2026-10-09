@@ -49,8 +49,14 @@ _AGGREGATES = """
     COUNT(*) FILTER (WHERE status IN {failed}) AS failed_calls,
     COALESCE(SUM(cost_usd) FILTER (WHERE status IN {failed}), 0) AS failed_cost_usd,
     COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
+    COUNT(*) FILTER (WHERE cost_usd IS NOT NULL AND cardinality(unpriced_models) > 0)
+        AS partially_priced_calls,
     COUNT(*) FILTER (WHERE is_estimated) AS estimated_calls
 """.format(failed=FAILED)
+# cost_usd is a LOWER BOUND whenever unpriced_calls or partially_priced_calls is non-zero:
+# an unpriced call adds nothing to it, and a partially priced one (say a priced main model
+# with an unpriced memory model) adds only its priced part. Both counts are returned
+# beside the total so a reader can tell a complete figure from a floor.
 
 
 def since(window: str, now: Optional[datetime.datetime] = None) -> datetime.datetime:
