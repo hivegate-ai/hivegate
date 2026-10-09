@@ -9,15 +9,15 @@ from db.db_models import AgentInfoDB
 from tests.test_utils import create_test_client
 
 AGENT = {
-    "id": "pf-cash-manager",
-    "name": "Cash Manager",
+    "id": "support-agent",
+    "name": "Support Agent",
     "description": "test",
-    "prompt_service_id": "cash-1",
+    "prompt_service_id": "support-1",
     "tags": "[]",
     "version": "1",
 }
 REQUEST = {
-    "message": "how much cash did I spend?",
+    "message": "where is my order?",
     "model": "claude-sonnet-5-5",
     "user_id": "u1",
     "session_id": "s1",
@@ -52,7 +52,7 @@ class UsageWiringTest(unittest.TestCase):
         patch("api.routes.v2.agents.get_agent_info", return_value=AgentInfoDB(**AGENT)).start()
         prompts = patch("api.routes.v2.agents.prompts_client").start()
         prompts.get_prompt.return_value = SimpleNamespace(
-            template="You manage cash.", name="cash_manager", description="Cash"
+            template="You help customers.", name="support_agent", description="Support"
         )
         self.record = patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock).start()
         self.record.return_value = {"cost_usd": 0.0123, "status": "completed"}
@@ -82,13 +82,13 @@ class UsageWiringTest(unittest.TestCase):
             )
 
         self._agent(arun)
-        resp = self.client.post("/v2/agents/pf-cash-manager/chat", json={**REQUEST, "stream": False})
+        resp = self.client.post("/v2/agents/support-agent/chat", json={**REQUEST, "stream": False})
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["token_usage"]["cost_usd"], 0.0123)
         c = self._collector()
         self.assertEqual(
             (c.ctx.agent_id, c.ctx.tenant_id, c.ctx.request_model, c.run_id),
-            ("pf-cash-manager", "tenant-9", "claude-sonnet-5-5", "r1"),
+            ("support-agent", "tenant-9", "claude-sonnet-5-5", "r1"),
         )
         self.assertEqual(c.metrics["input_tokens"], 10)
 
@@ -97,7 +97,7 @@ class UsageWiringTest(unittest.TestCase):
             raise RuntimeError("credit balance is too low")
 
         self._agent(arun)
-        resp = self.client.post("/v2/agents/pf-cash-manager/chat", json={**REQUEST, "stream": False})
+        resp = self.client.post("/v2/agents/support-agent/chat", json={**REQUEST, "stream": False})
         self.assertEqual(resp.status_code, 500)
         c = self._collector()
         self.assertEqual(c.status, "error")
@@ -121,12 +121,12 @@ class UsageWiringTest(unittest.TestCase):
             return gen()
 
         self._agent(arun)
-        resp = self.client.post("/v2/agents/pf-cash-manager/chat", json={**REQUEST, "stream": True})
+        resp = self.client.post("/v2/agents/support-agent/chat", json={**REQUEST, "stream": True})
         self.assertEqual(resp.status_code, 200)
         _ = resp.text  # drain the stream
         c = self._collector()
         self.assertEqual((c.metrics["input_tokens"], c.model_requests, c.tool_calls, c.run_id), (40, 1, 1, "r2"))
-        self.assertEqual(c.ctx.agent_id, "pf-cash-manager")
+        self.assertEqual(c.ctx.agent_id, "support-agent")
 
     def test_a_stream_that_dies_midway_is_recorded_as_an_error(self):
         def arun(*a, **k):
@@ -137,7 +137,7 @@ class UsageWiringTest(unittest.TestCase):
             return gen()
 
         self._agent(arun)
-        resp = self.client.post("/v2/agents/pf-cash-manager/chat", json={**REQUEST, "stream": True})
+        resp = self.client.post("/v2/agents/support-agent/chat", json={**REQUEST, "stream": True})
         _ = resp.text
         c = self._collector()
         self.assertEqual((c.status, c.request_tokens["input_tokens"]), ("error", 99))

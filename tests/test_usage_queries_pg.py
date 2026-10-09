@@ -77,10 +77,10 @@ def test_rows_round_trip_and_every_query_runs(session_factory):
         },
     }
     rows = [
-        _run("pf-budget-classifier", "family", memory_split),
-        _run("pf-cash-manager", "demo", {"input_tokens": 1000, "output_tokens": 10}),
-        _run("pf-budget-classifier", "family", {"input_tokens": 500_000}, {"event": "RunError", "content": "refusal"}),
-        _run("pf-cash-manager", "demo", {"input_tokens": 10}, model="gemini-3-flash-preview"),
+        _run("support-agent", "acme", memory_split),
+        _run("research-agent", "globex", {"input_tokens": 1000, "output_tokens": 10}),
+        _run("support-agent", "acme", {"input_tokens": 500_000}, {"event": "RunError", "content": "refusal"}),
+        _run("research-agent", "globex", {"input_tokens": 10}, model="gemini-3-flash-preview"),
     ]
     ids = [usage.write_row(r, session_factory=session_factory) for r in rows]
     assert all(ids)
@@ -97,20 +97,20 @@ def test_rows_round_trip_and_every_query_runs(session_factory):
         assert totals["failed_cost_usd"] == pytest.approx(1.0)  # 500k on Sonnet 5.5 ($2/M)
 
         by_agent = {g["key"]: g for g in q.summary(db, "24h", "agent")}
-        classifier = by_agent["pf-budget-classifier"]
-        assert classifier["calls"] == 2
-        assert classifier["cost_usd"] == pytest.approx(4.0 + 1.0 + 1.0)  # 2M in + 100k out + failed 500k
+        support = by_agent["support-agent"]
+        assert support["calls"] == 2
+        assert support["cost_usd"] == pytest.approx(4.0 + 1.0 + 1.0)  # 2M in + 100k out + failed 500k
 
         split = {m["model_type"]: m for m in q.model_type_split(db, "24h")}
         assert split["memory_model"]["cost_usd"] == pytest.approx(2.0)
 
         points = q.timeseries(db, "24h", "5m", "agent", top=1)
-        assert {p["key"] for p in points} == {"pf-budget-classifier", "(other)"}
+        assert {p["key"] for p in points} == {"support-agent", "(other)"}
 
         top = q.calls(db, "24h", order="cost", limit=2)
-        assert top[0]["agent_id"] == "pf-budget-classifier"
+        assert top[0]["agent_id"] == "support-agent"
         assert q.calls(db, "24h", status="refused")[0]["error"] == "refusal"
-        assert q.calls(db, "24h", tenant="demo", order="recent")[0]["model"] == "gemini-3-flash-preview"
+        assert q.calls(db, "24h", tenant="globex", order="recent")[0]["model"] == "gemini-3-flash-preview"
         assert q.calls(db, "24h", min_cost=5)[0]["cost_usd"] == pytest.approx(5.0)  # main $3 + memory $2
     finally:
         db.close()

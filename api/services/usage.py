@@ -10,8 +10,8 @@ Why it is built like this:
     inside events with `content`, so a RunCompleted without content fell back to a
     len/4 estimate.
   - Failed runs are recorded too, with their real tokens. A run that errors or is
-    refused after the model was called is still billed - that is how 1.68M tokens
-    were spent unseen on 2026-09-29. agno attaches no run metrics to RunError, so the
+    refused after the model was called is still billed, and a retry loop of such runs
+    can spend a lot unseen. agno attaches no run metrics to RunError, so the
     per-request ModelRequestCompleted counts are summed as the fallback.
   - The row is priced per model in the run (main, memory, compression, ...), each at
     its own price (agents/pricing.py).

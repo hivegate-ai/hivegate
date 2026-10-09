@@ -12,7 +12,7 @@ AT = datetime(2026, 10, 8, tzinfo=timezone.utc)
 
 
 def collector(**ctx):
-    c = usage.UsageCollector(usage.UsageContext(agent_id="pf-cash-manager", **ctx))
+    c = usage.UsageCollector(usage.UsageContext(agent_id="support-agent", **ctx))
     c.set_model("claude-sonnet-5-5", "Anthropic")
     return c
 
@@ -145,12 +145,12 @@ def test_context_from_a_request_body_and_key():
         tenant_profile=None,
         user_profile=SimpleNamespace(tenant_id="t-1"),
     )
-    ctx = usage.context_for("pf-x", body, SimpleNamespace(id=7, name="classifier"))
+    ctx = usage.context_for("agent-x", body, SimpleNamespace(id=7, name="backend"))
     assert (ctx.agent_id, ctx.tenant_id, ctx.api_key_id, ctx.api_key_name, ctx.request_model) == (
-        "pf-x",
+        "agent-x",
         "t-1",
         7,
-        "classifier",
+        "backend",
         "anthropic:sonnet-latest",
     )
 
