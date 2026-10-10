@@ -607,7 +607,7 @@ async def commit_response_streamer_v2(
     Yields:
         SSE-formatted event strings with agent response chunks including status, run_id, and tools
     """
-    logging.debug(f"Starting v2 streaming commit response for run_id: {body.run_id}")
+    logging.debug(f"Starting v2 streaming commit response for run_id: {_log_safe(body.run_id)}")
 
     # agno 3 resumes from `requirements` and ignores `updated_tools` - see agents/hitl.py.
     run_response = agent.acontinue_run(
@@ -655,7 +655,9 @@ async def commit_response_streamer_v2(
         collector.fail(f"{type(e).__name__}: {e}")
         error_data = {
             "status": "error",
-            "error": f"Streaming error: {type(e).__name__}: {str(e)}",
+            # The detail stays server-side (the log above and token_usage.error): an
+            # exception message can carry provider or internal details.
+            "error": "Streaming error",
             "content": full_output_text if full_output_text else None,
         }
         yield _format_sse_event("error", error_data)
@@ -793,7 +795,9 @@ async def chat_response_streamer_v2(
         collector.fail(f"{type(e).__name__}: {e}")
         error_data = {
             "status": "error",
-            "error": f"Streaming error: {type(e).__name__}: {str(e)}",
+            # The detail stays server-side (the log above and token_usage.error): an
+            # exception message can carry provider or internal details.
+            "error": "Streaming error",
             "content": full_output_text if full_output_text else None,
         }
         yield _format_sse_event("error", error_data)
@@ -928,7 +932,7 @@ async def chat_with_agent_v2(
                 )
 
             if body.stream:
-                logging.info(f"Returning v2 streaming response (MCP) for agent: {agent_id}")
+                logging.info(f"Returning v2 streaming response (MCP) for agent: {_log_safe(agent_id)}")
                 return StreamingResponse(
                     _mcp_chat_streamer(_build_mcp_agent, mcp_toolkits, body, db, usage_ctx),
                     media_type="text/event-stream",
@@ -1013,7 +1017,7 @@ async def chat_with_agent_v2(
 
         # Execute agent run
         if body.stream:
-            logging.info(f"Returning v2 streaming response for agent: {agent_id}")
+            logging.info(f"Returning v2 streaming response for agent: {_log_safe(agent_id)}")
             return StreamingResponse(
                 chat_response_streamer_v2(agent, body, db, usage_ctx),
                 media_type="text/event-stream",
@@ -1092,7 +1096,7 @@ async def chat_with_agent_v2(
                 collector.fail(f"{type(e).__name__}: {e}")
                 await record_usage(collector)
                 raise
-            logging.debug(f"Completed v2 non-streaming request for agent: {agent_id}")
+            logging.debug(f"Completed v2 non-streaming request for agent: {_log_safe(agent_id)}")
             collector.observe_response(response)
             token_usage = await record_usage(collector)
 
@@ -1403,7 +1407,7 @@ async def commit_agent_chat_v2(
 
         # Continue the run with updated tools
         if body.stream:
-            logging.info(f"Returning v2 streaming response for commit: {body.run_id}")
+            logging.info(f"Returning v2 streaming response for commit: {_log_safe(body.run_id)}")
             return StreamingResponse(
                 commit_response_streamer_v2(
                     agent, body, cached_run, db, usage_service.context_for(agent_id, body, api_key, kind="commit")
@@ -1422,7 +1426,7 @@ async def commit_agent_chat_v2(
                 collector.fail(f"{type(e).__name__}: {e}")
                 await record_usage(collector)
                 raise
-            logging.debug(f"Completed commit request for agent: {agent_id}")
+            logging.debug(f"Completed commit request for agent: {_log_safe(agent_id)}")
 
             # Metered like every run; the summary (tokens, cost) goes back to the caller.
             collector.observe_response(response)

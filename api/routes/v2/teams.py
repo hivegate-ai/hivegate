@@ -22,7 +22,7 @@ from agents import DEFAULT_MODEL, Model
 from agents.hitl import requirements_for
 from agents.model_resolver import resolve_model_id
 from agents.v2_selector import get_agent
-from api.routes.v2.agents import TenantProfile, UserProfile
+from api.routes.v2.agents import TenantProfile, UserProfile, _log_safe
 from api.services import usage as usage_service
 from api.services.access_token import fetch_access_token
 from api.services.auth import get_api_key
@@ -650,7 +650,9 @@ async def team_response_streamer(
         collector.fail(f"{type(e).__name__}: {e}")
         error_data = {
             "status": "error",
-            "error": f"Streaming error: {type(e).__name__}: {str(e)}",
+            # The detail stays server-side (the log above and token_usage.error): an
+            # exception message can carry provider or internal details.
+            "error": "Streaming error",
             "content": full_output_text if full_output_text else None,
         }
         yield _format_sse_event("error", error_data)
@@ -731,7 +733,9 @@ async def commit_team_response_streamer(
         collector.fail(f"{type(e).__name__}: {e}")
         error_data = {
             "status": "error",
-            "error": f"Streaming error: {type(e).__name__}: {str(e)}",
+            # The detail stays server-side (the log above and token_usage.error): an
+            # exception message can carry provider or internal details.
+            "error": "Streaming error",
             "content": full_output_text if full_output_text else None,
         }
         yield _format_sse_event("error", error_data)
@@ -787,8 +791,6 @@ async def create_team_run_v2(
         logging.info(f"Team mode: {team_mode}, agents count: {len(team_agents_db)}")
 
         if team_mode == "supervisor":
-            import asyncio
-
             from supervisor.team_builder import build_supervisor_team
 
             logging.info("Building supervisor team...")
@@ -853,7 +855,7 @@ async def create_team_run_v2(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     if body.stream:
-        logging.info(f"Returning v2 streaming response for team: {team_id}")
+        logging.info(f"Returning v2 streaming response for team: {_log_safe(team_id)}")
         return StreamingResponse(
             team_response_streamer(
                 team, body.message, db, usage_service.context_for(team_id, body, api_key, kind="team")
@@ -861,7 +863,7 @@ async def create_team_run_v2(
             media_type="text/event-stream",
         )
     else:
-        logging.info(f"Processing v2 non-streaming request for team: {team_id}")
+        logging.info(f"Processing v2 non-streaming request for team: {_log_safe(team_id)}")
         collector = usage_service.UsageCollector(usage_service.context_for(team_id, body, api_key, kind="team"))
         collector.set_model(*usage_service.model_of(team))
         collector.input_text = body.message
@@ -871,7 +873,7 @@ async def create_team_run_v2(
             collector.fail(f"{type(e).__name__}: {e}")
             await record_usage(collector)
             raise
-        logging.debug(f"Completed v2 non-streaming request for team: {team_id}")
+        logging.debug(f"Completed v2 non-streaming request for team: {_log_safe(team_id)}")
 
         # Metered like every run (this path used to store nothing); the summary goes back.
         collector.observe_response(response)
@@ -1045,7 +1047,7 @@ async def commit_team_run_v2(
             collector.fail(f"{type(e).__name__}: {e}")
             await record_usage(collector)
             raise
-        logging.debug(f"Completed commit request for team: {team_id}")
+        logging.debug(f"Completed commit request for team: {_log_safe(team_id)}")
 
         # Metered like every run (this path used to store nothing); the summary goes back.
         collector.observe_response(response)
