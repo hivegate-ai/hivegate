@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 import logging
@@ -11,7 +12,6 @@ from agno.models.google import Gemini
 
 # agno.models.metrics.Metrics was only a backward-compat alias of RunMetrics, and
 # agno 3 removed it. RunMetrics lives in agno.metrics from 2.6 through 3.x.
-from agno.metrics import RunMetrics as Metrics
 from agno.team import Team, TeamMode
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -22,12 +22,14 @@ from agents import DEFAULT_MODEL, Model
 from agents.hitl import requirements_for
 from agents.model_resolver import resolve_model_id
 from agents.v2_selector import get_agent
-from api.routes.v2.agents import TenantProfile, UserProfile
+from api.routes.v2.agents import TenantProfile, UserProfile, _log_safe
+from api.services import usage as usage_service
 from api.services.access_token import fetch_access_token
+from api.services.auth import get_api_key
 from api.services.knowledge_service import get_knowledge_service
 from api.settings import api_settings
 from db.agent_info_crud import get_agent_info
-from db.db_models import TokenUsage
+from db.db_models import ApiKeyDB
 from db.session import db_engine
 
 # Database models imported but not directly used - accessed via CRUD functions
@@ -339,53 +341,9 @@ def _process_tools_in_event(event_data: Dict[str, Any]) -> None:
             event_data["tools"] = [tool_dict]
 
 
-def store_token_usage_team(
-    team: Team,
-    input_text: str,
-    output_text: str,
-    metrics: Optional[Metrics] = None,
-    db: Optional[Session] = None,
-) -> None:
-    """
-    Store token usage information in the database for teams.
-
-    Args:
-        team: The team instance that processed the request
-        input_text: The input text (prompt)
-        output_text: The output text (completion)
-        metrics: Optional Metrics object from Agno containing token counts
-        db: Database session
-
-    Returns:
-        None
-    """
-    if not db:
-        logging.warning("No database session provided, skipping token usage storage")
-        return
-
-    if metrics and metrics.total_tokens > 0:
-        logging.info(
-            f"Token usage - Input: {metrics.input_tokens}, Output: {metrics.output_tokens}, Total: {metrics.total_tokens}"
-        )
-
-        # Store token usage in database using Agno 2.x Metrics dataclass
-        prompt_tokens = metrics.input_tokens
-        completion_tokens = metrics.output_tokens
-        total_tokens = metrics.total_tokens
-
-        token_usage = TokenUsage(
-            agent_id=team.id,  # type: ignore[attr-defined]
-            session_id=team.session_id,
-            user_id=team.user_id,
-            model=team.model.id if hasattr(team, "model") and team.model else None,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            is_estimated=False,  # From actual Metrics object
-        )
-        db.add(token_usage)
-        db.commit()
-        logging.debug("Token usage stored in database")
+# Every team run is metered by api/services/usage.py, like agent runs. Module-level so
+# tests can patch it.
+record_usage = usage_service.record
 
 
 ######################################################
@@ -582,7 +540,7 @@ async def get_team_info_v2(team_id: str, db: Session = Depends(get_db)):
     # Get team data from database
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     # Get team agents
@@ -604,7 +562,12 @@ async def get_team_info_v2(team_id: str, db: Session = Depends(get_db)):
     return team_info
 
 
-async def team_response_streamer(team: Team, message: str, db: Session = Depends(get_db)) -> AsyncGenerator:
+async def team_response_streamer(
+    team: Team,
+    message: str,
+    db: Session = Depends(get_db),
+    usage_ctx: Optional[usage_service.UsageContext] = None,
+) -> AsyncGenerator:
     """
     Stream team responses chunk by chunk (SSE format).
 
@@ -616,11 +579,15 @@ async def team_response_streamer(team: Team, message: str, db: Session = Depends
     Yields:
         SSE-formatted event strings with team response chunks including status, run_id, and tools
     """
-    logging.debug(f"Starting team streaming response for message: {message[:50]}...")
+    logging.debug(f"Starting team streaming response for message: {_log_safe(message[:50])}...")
     run_response = team.arun(message, stream=True)  # Returns async generator, don't await
     chunk_count = 0
     full_output_text = ""
-    last_metrics = None
+    collector = usage_service.UsageCollector(
+        usage_ctx or usage_service.UsageContext(agent_id=getattr(team, "id", None), kind="team")
+    )
+    collector.set_model(*usage_service.model_of(team))
+    collector.input_text = message
 
     try:
         async for chunk in run_response:
@@ -640,12 +607,11 @@ async def team_response_streamer(team: Team, message: str, db: Session = Depends
             if not event_data or "error" in event_data:
                 logging.warning(f"Skipping chunk that couldn't be serialized: {event_data}")
                 continue
+            collector.observe(event_data)
 
-            # Accumulate text and keep track of the latest metrics
-            if "content" in event_data:
-                full_output_text += event_data["content"] if event_data["content"] else ""
-                if "metrics" in event_data:
-                    last_metrics = Metrics(**event_data["metrics"])
+            # Accumulate the answer text
+            if isinstance(event_data.get("content"), str):
+                full_output_text += event_data["content"]
 
             # Cache the run for later commit if run_id is present
             if "run_id" in event_data and event_data["run_id"]:
@@ -673,26 +639,37 @@ async def team_response_streamer(team: Team, message: str, db: Session = Depends
 
             yield _format_sse_event("message", event_data)
 
+    except (asyncio.CancelledError, GeneratorExit):
+        # The client hung up mid-stream. Record the run as cancelled, not completed:
+        # its final metrics never arrived (api/services/usage.py, disconnect()).
+        collector.disconnect()
+        raise
     except Exception as e:
         # Log the error and send error event to client
         logging.error(f"Error during team streaming response: {type(e).__name__}: {str(e)}", exc_info=True)
+        collector.fail(f"{type(e).__name__}: {e}")
         error_data = {
             "status": "error",
-            "error": f"Streaming error: {type(e).__name__}: {str(e)}",
+            # The detail stays server-side (the log above and token_usage.error): an
+            # exception message can carry provider or internal details.
+            "error": "Streaming error",
             "content": full_output_text if full_output_text else None,
         }
         yield _format_sse_event("error", error_data)
     finally:
-        # Store token usage after all chunks are processed (or on error)
-        if full_output_text or last_metrics:
-            store_token_usage_team(
-                team=team, input_text=message, output_text=full_output_text, metrics=last_metrics, db=db
-            )
+        # Meter the run after all chunks are processed, on error, or on a disconnect -
+        # failed and abandoned runs are billed too. Shielded: after a disconnect the
+        # stream's cancel scope would otherwise cancel this write as well.
+        await usage_service.shielded(record_usage(collector))
         logging.debug(f"Completed team streaming response with {chunk_count} chunks")
 
 
 async def commit_team_response_streamer(
-    team: Team, body: TeamCommitRequest, cached_run: Any, db: Session = Depends(get_db)
+    team: Team,
+    body: TeamCommitRequest,
+    cached_run: Any,
+    db: Session = Depends(get_db),
+    usage_ctx: Optional[usage_service.UsageContext] = None,
 ) -> AsyncGenerator:
     """
     Stream team responses for commit/continue run chunk by chunk.
@@ -716,7 +693,11 @@ async def commit_team_response_streamer(
     )
     chunk_count = 0
     full_output_text = ""
-    last_metrics = None
+    collector = usage_service.UsageCollector(
+        usage_ctx or usage_service.UsageContext(agent_id=getattr(team, "id", None), kind="team")
+    )
+    collector.set_model(*usage_service.model_of(team))
+    collector.input_text = "[commit continuation]"
 
     try:
         async for chunk in run_response:
@@ -730,33 +711,39 @@ async def commit_team_response_streamer(
 
             # Convert chunk to dict
             event_data = _event_to_dict(chunk)
+            collector.observe(event_data)
 
-            # Accumulate text and keep track of the latest metrics
-            if "content" in event_data:
-                full_output_text += event_data["content"] if event_data["content"] else ""
-                if "metrics" in event_data:
-                    last_metrics = Metrics(**event_data["metrics"])
+            # Accumulate the answer text
+            if isinstance(event_data.get("content"), str):
+                full_output_text += event_data["content"]
 
             # Process tools using shared helper function
             _process_tools_in_event(event_data)
 
             yield _format_sse_event("message", event_data)
 
+    except (asyncio.CancelledError, GeneratorExit):
+        # The client hung up mid-stream. Record the run as cancelled, not completed:
+        # its final metrics never arrived (api/services/usage.py, disconnect()).
+        collector.disconnect()
+        raise
     except Exception as e:
         # Log the error and send error event to client
         logging.error(f"Error during team streaming commit response: {type(e).__name__}: {str(e)}")
+        collector.fail(f"{type(e).__name__}: {e}")
         error_data = {
             "status": "error",
-            "error": f"Streaming error: {type(e).__name__}: {str(e)}",
+            # The detail stays server-side (the log above and token_usage.error): an
+            # exception message can carry provider or internal details.
+            "error": "Streaming error",
             "content": full_output_text if full_output_text else None,
         }
         yield _format_sse_event("error", error_data)
     finally:
-        # Store token usage after all chunks are processed (or on error)
-        if full_output_text or last_metrics:
-            store_token_usage_team(
-                team=team, input_text="[commit continuation]", output_text=full_output_text, metrics=last_metrics, db=db
-            )
+        # Meter the run after all chunks are processed, on error, or on a disconnect -
+        # failed and abandoned runs are billed too. Shielded: after a disconnect the
+        # stream's cancel scope would otherwise cancel this write as well.
+        await usage_service.shielded(record_usage(collector))
         logging.debug(f"Completed team streaming commit response with {chunk_count} chunks")
 
         # Clean up run cache
@@ -766,7 +753,12 @@ async def commit_team_response_streamer(
 
 
 @v2_teams_router.post("/{team_id}/runs", status_code=status.HTTP_200_OK)
-async def create_team_run_v2(team_id: str, body: TeamRunRequest, db: Session = Depends(get_db)):
+async def create_team_run_v2(
+    team_id: str,
+    body: TeamRunRequest,
+    db: Session = Depends(get_db),
+    api_key: Optional[ApiKeyDB] = Depends(get_api_key),
+):
     """
     Create a team run using the v2 API.
 
@@ -778,20 +770,20 @@ async def create_team_run_v2(team_id: str, body: TeamRunRequest, db: Session = D
     Returns:
         Either a streaming response or a complete TeamRunResponse
     """
-    logging.info(f"Creating v2 team run for team_id: {team_id}")
-    logging.debug(f"TeamRunRequest: {body}")
+    logging.info(f"Creating v2 team run for team_id: {_log_safe(team_id)}")
+    logging.debug(f"TeamRunRequest: {_log_safe(body)}")
 
     # Validate team exists in database first
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
         # Get team agents
         team_agents_db = get_team_agents(db, team_id)
         if not team_agents_db:
-            logging.error(f"Team {team_id} has no agents")
+            logging.error(f"Team {_log_safe(team_id)} has no agents")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Team {team_id} has no agents")
 
         # Check team mode — supervisor teams use the supervisor team builder
@@ -799,8 +791,6 @@ async def create_team_run_v2(team_id: str, body: TeamRunRequest, db: Session = D
         logging.info(f"Team mode: {team_mode}, agents count: {len(team_agents_db)}")
 
         if team_mode == "supervisor":
-            import asyncio
-
             from supervisor.team_builder import build_supervisor_team
 
             logging.info("Building supervisor team...")
@@ -856,29 +846,38 @@ async def create_team_run_v2(team_id: str, body: TeamRunRequest, db: Session = D
                 db_url=db_url,
                 debug_mode=False,
             )
-        logging.debug(f"Successfully created enhanced team: {team_id}")
+        logging.debug(f"Successfully created enhanced team: {_log_safe(team_id)}")
 
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"Error creating team {team_id}: {str(e)}")
+        logging.error(f"Error creating team {_log_safe(team_id)}: {_log_safe(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     if body.stream:
-        logging.info(f"Returning v2 streaming response for team: {team_id}")
+        logging.info(f"Returning v2 streaming response for team: {_log_safe(team_id)}")
         return StreamingResponse(
-            team_response_streamer(team, body.message, db),
+            team_response_streamer(
+                team, body.message, db, usage_service.context_for(team_id, body, api_key, kind="team")
+            ),
             media_type="text/event-stream",
         )
     else:
-        logging.info(f"Processing v2 non-streaming request for team: {team_id}")
-        response = await team.arun(body.message, stream=False)
-        logging.debug(f"Completed v2 non-streaming request for team: {team_id}")
+        logging.info(f"Processing v2 non-streaming request for team: {_log_safe(team_id)}")
+        collector = usage_service.UsageCollector(usage_service.context_for(team_id, body, api_key, kind="team"))
+        collector.set_model(*usage_service.model_of(team))
+        collector.input_text = body.message
+        try:
+            response = await team.arun(body.message, stream=False)
+        except Exception as e:
+            collector.fail(f"{type(e).__name__}: {e}")
+            await record_usage(collector)
+            raise
+        logging.debug(f"Completed v2 non-streaming request for team: {_log_safe(team_id)}")
 
-        # Extract token usage metrics
-        token_usage = None
-        if hasattr(response, "metrics") and response.metrics:
-            token_usage = response.metrics.to_dict()
+        # Metered like every run (this path used to store nothing); the summary goes back.
+        collector.observe_response(response)
+        token_usage = await record_usage(collector)
 
         # Extract status and run_id
         response_status = response.status if hasattr(response, "status") else None
@@ -922,7 +921,12 @@ async def create_team_run_v2(team_id: str, body: TeamRunRequest, db: Session = D
 
 
 @v2_teams_router.post("/{team_id}/runs/commit", status_code=status.HTTP_200_OK)
-async def commit_team_run_v2(team_id: str, body: TeamCommitRequest, db: Session = Depends(get_db)):
+async def commit_team_run_v2(
+    team_id: str,
+    body: TeamCommitRequest,
+    db: Session = Depends(get_db),
+    api_key: Optional[ApiKeyDB] = Depends(get_api_key),
+):
     """
     Resume a paused team run with confirmed/edited tools.
 
@@ -935,7 +939,7 @@ async def commit_team_run_v2(team_id: str, body: TeamCommitRequest, db: Session 
         TeamRunResponse with continued execution results
     """
     try:
-        logging.info(f"Commit request for team {team_id}, run_id: {body.run_id}")
+        logging.info(f"Commit request for team {_log_safe(team_id)}, run_id: {_log_safe(body.run_id)}")
 
         # Check if any tool has confirmed=false (user denial)
         tools_with_confirmation = [tool for tool in body.updated_tools if tool.get("confirmed") is not None]
@@ -946,10 +950,12 @@ async def commit_team_run_v2(team_id: str, body: TeamCommitRequest, db: Session 
         # Retrieve cached run
         with _team_run_cache_lock:
             if body.run_id not in _team_run_cache:
-                logging.error(f"Run ID {body.run_id} not found in cache")
+                logging.error(f"Run ID {_log_safe(body.run_id)} not found in cache")
                 # If all tools are denied and run_id not found, return denial response without error
                 if all_denied:
-                    logging.info(f"Run ID {body.run_id} not found but all tools denied - returning denial response")
+                    logging.info(
+                        f"Run ID {_log_safe(body.run_id)} not found but all tools denied - returning denial response"
+                    )
                     return TeamRunResponse(
                         content="Tool execution cancelled by user.",
                         team_id=team_id,
@@ -967,7 +973,7 @@ async def commit_team_run_v2(team_id: str, body: TeamCommitRequest, db: Session 
 
         # Check if user denied all tools
         if all_denied:
-            logging.info(f"User denied all tools for run_id: {body.run_id}")
+            logging.info(f"User denied all tools for run_id: {_log_safe(body.run_id)}")
             # Clean up run cache
             with _team_run_cache_lock:
                 if body.run_id in _team_run_cache:
@@ -1032,15 +1038,22 @@ async def commit_team_run_v2(team_id: str, body: TeamCommitRequest, db: Session 
         )
 
         # Continue the run with updated tools
-        response = await team.acontinue_run(  # type: ignore[attr-defined]
-            run_id=body.run_id, requirements=requirements_for(cached_run, cached_run.tools), stream=False
-        )
-        logging.debug(f"Completed commit request for team: {team_id}")
+        collector = usage_service.UsageCollector(usage_service.context_for(team_id, body, api_key, kind="team"))
+        collector.set_model(*usage_service.model_of(team))
+        collector.input_text = "[commit continuation]"
+        try:
+            response = await team.acontinue_run(  # type: ignore[attr-defined]
+                run_id=body.run_id, requirements=requirements_for(cached_run, cached_run.tools), stream=False
+            )
+        except Exception as e:
+            collector.fail(f"{type(e).__name__}: {e}")
+            await record_usage(collector)
+            raise
+        logging.debug(f"Completed commit request for team: {_log_safe(team_id)}")
 
-        # Extract token usage metrics
-        token_usage = None
-        if hasattr(response, "metrics") and response.metrics:
-            token_usage = response.metrics.to_dict()
+        # Metered like every run (this path used to store nothing); the summary goes back.
+        collector.observe_response(response)
+        token_usage = await record_usage(collector)
 
         # Clean up run cache
         with _team_run_cache_lock:
@@ -1059,7 +1072,7 @@ async def commit_team_run_v2(team_id: str, body: TeamCommitRequest, db: Session 
     except HTTPException:
         raise
     except Exception as e:
-        logging.exception(f"Unexpected error in commit_team_run_v2 for team {team_id}: {str(e)}")
+        logging.exception(f"Unexpected error in commit_team_run_v2 for team {_log_safe(team_id)}: {_log_safe(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error occurred while committing team run for team {team_id}",
@@ -1083,7 +1096,7 @@ async def get_team_sessions_v2(team_id: str, db: Session = Depends(get_db)):
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
@@ -1165,7 +1178,7 @@ async def get_team_session_v2(team_id: str, session_id: str, db: Session = Depen
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
@@ -1243,7 +1256,7 @@ async def delete_team_session_v2(team_id: str, session_id: str, db: Session = De
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
@@ -1390,7 +1403,7 @@ async def delete_team_v2(team_id: str, soft: bool = False, db: Session = Depends
             # Soft delete: mark as inactive
             result = soft_delete_team_info(db, team_id)
             if not result:
-                logging.error(f"Team {team_id} not found in database")
+                logging.error(f"Team {_log_safe(team_id)} not found in database")
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
             logging.info(f"Team {team_id} soft deleted successfully")
@@ -1399,7 +1412,7 @@ async def delete_team_v2(team_id: str, soft: bool = False, db: Session = Depends
             # Hard delete: permanently remove from database
             result = delete_team_info(db, team_id)
             if not result:
-                logging.error(f"Team {team_id} not found in database")
+                logging.error(f"Team {_log_safe(team_id)} not found in database")
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
             logging.info(f"Team {team_id} hard deleted successfully")
@@ -1431,7 +1444,7 @@ async def get_team_memories_v2(team_id: str, db: Session = Depends(get_db)):
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
@@ -1490,7 +1503,7 @@ async def get_team_members_v2(team_id: str, db: Session = Depends(get_db)):
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     # Get team agents
@@ -1528,7 +1541,7 @@ async def add_team_member_v2(team_id: str, body: AddMemberRequest, db: Session =
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     # Validate agent exists
@@ -1591,7 +1604,7 @@ async def remove_team_member_v2(team_id: str, agent_id: str, db: Session = Depen
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
@@ -1637,7 +1650,7 @@ async def update_team_member_v2(team_id: str, agent_id: str, body: UpdateMemberR
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     # Validate at least one field is provided for update

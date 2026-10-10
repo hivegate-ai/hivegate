@@ -26,9 +26,9 @@ REPLY = {
 TOOL = {
     "type": "function",
     "function": {
-        "name": "get_budget_tree",
-        "description": "Read a budget",
-        "parameters": {"type": "object", "properties": {"month": {"type": "string"}}, "required": ["month"]},
+        "name": "get_order",
+        "description": "Read an order",
+        "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}}, "required": ["order_id"]},
     },
 }
 
@@ -50,8 +50,8 @@ def test_system_prompt_and_conversation_are_cached():
     body, response = send(
         model,
         [
-            Message(role="system", content="You are the Budget Architect. " * 50),
-            Message(role="user", content="build my budget"),
+            Message(role="system", content="You are a support agent. " * 50),
+            Message(role="user", content="where is my order?"),
         ],
         tools=[TOOL],
     )
@@ -59,7 +59,7 @@ def test_system_prompt_and_conversation_are_cached():
     assert body["system"][-1]["cache_control"] == {"type": "ephemeral"}
     # automatic caching of the growing conversation
     assert body["cache_control"] == {"type": "ephemeral"}
-    assert body["tools"][0]["name"] == "get_budget_tree"
+    assert body["tools"][0]["name"] == "get_order"
     assert response.response_usage.cache_read_tokens == 900
 
 
@@ -106,7 +106,7 @@ def test_streaming_requests_are_cached_too():
 
     async def run():
         messages = [
-            Message(role="system", content="You are the Budget Architect. " * 50),
+            Message(role="system", content="You are a support agent. " * 50),
             Message(role="user", content="hi"),
         ]
         return [r async for r in model.ainvoke_stream(messages=messages, assistant_message=Message(role="assistant"))]

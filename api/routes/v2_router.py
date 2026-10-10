@@ -2,15 +2,17 @@ import logging
 
 from fastapi import APIRouter, Depends
 
-from api.services.auth import get_api_key
+from api.services.auth import get_api_key, reject_usage_only_keys
 
 
 def get_v2_router() -> APIRouter:
     logging.info("Initializing v2 API router")
 
     # Create V2 router with API key authentication dependency
-    # All routes under /v2 will require valid API key (unless AUTH_DISABLED=true)
-    v2_router = APIRouter(prefix="/v2", dependencies=[Depends(get_api_key)])
+    # All routes under /v2 will require valid API key (unless AUTH_DISABLED=true).
+    # A read-only usage key (scope usage:read only) is refused here: it exists for the
+    # /usage dashboard and must not be able to call agents.
+    v2_router = APIRouter(prefix="/v2", dependencies=[Depends(get_api_key), Depends(reject_usage_only_keys)])
 
     # Include the v2 agents router
     logging.debug("Getting and including v2 agents router")

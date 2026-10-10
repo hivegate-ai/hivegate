@@ -3,7 +3,7 @@ Integration tests for V2 agents API endpoints.
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from db.db_models import AgentInfoDB
 from tests.test_utils import create_test_client
@@ -351,7 +351,7 @@ class TestV2AgentsAPI(unittest.TestCase):
         # No need to check for 404 error as we're using the health endpoint
 
     @patch.dict("os.environ", {"PROMPT_STORAGE_BACKEND": "service"})
-    @patch("api.routes.v2.agents.store_token_usage")
+    @patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock)
     @patch("api.routes.v2.agents.prompts_client")
     @patch("api.routes.v2.agents.get_agent_info")
     def test_chat_with_v2_agent_success(self, mock_get_agent_info, mock_prompts_client, mock_store_token):
@@ -456,7 +456,7 @@ class TestV2AgentsAPI(unittest.TestCase):
     # ========================================
 
     @patch.dict("os.environ", {"PROMPT_STORAGE_BACKEND": "service"})
-    @patch("api.routes.v2.agents.store_token_usage")
+    @patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock)
     @patch("api.routes.v2.agents.prompts_client")
     @patch("db.agent_info_crud.get_agent_info")
     def test_chat_with_profiles_and_paused_status(self, mock_get_agent_info, mock_prompts_client, mock_store_token):
@@ -533,7 +533,7 @@ class TestV2AgentsAPI(unittest.TestCase):
             self.assertEqual(len(data["tools"]), 1)
             self.assertEqual(data["tools"][0]["tool_name"], "schedule_meeting")
 
-    @patch("api.routes.v2.agents.store_token_usage")
+    @patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock)
     @patch("api.routes.v2.agents.get_agent")
     def test_chat_commit_success(self, mock_get_agent, mock_store_token):
         """Test successful commit of paused run with confirmed tools."""
@@ -1126,7 +1126,7 @@ class TestV2AgentsAPI(unittest.TestCase):
         self.assertIn(response.status_code, [500, 200])  # Either error or success depending on implementation
 
     @patch.dict("os.environ", {"PROMPT_STORAGE_BACKEND": "service"})
-    @patch("api.routes.v2.agents.store_token_usage")
+    @patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock)
     @patch("api.routes.v2.agents.prompts_client")
     @patch("api.routes.v2.agents.get_agent_info")
     def test_agt_055_chat_streaming(self, mock_get_agent_info, mock_prompts_client, mock_store_token):
@@ -1227,7 +1227,7 @@ class TestV2AgentsAPI(unittest.TestCase):
     # Commit Tests (AGT-061, AGT-064)
     # ========================================
 
-    @patch("api.routes.v2.agents.store_token_usage")
+    @patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock)
     @patch("api.routes.v2.agents.get_agent")
     def test_agt_061_commit_with_edits(self, mock_get_agent, mock_store_token):
         """AGT-061: Commit with edited tool arguments."""
@@ -1303,7 +1303,7 @@ class TestV2AgentsAPI(unittest.TestCase):
         # Verify the tool was updated with edited args
         self.assertEqual(mock_tool.tool_args, {"summary": "Edited Meeting Title", "start": "2025-10-25T14:00:00Z"})
 
-    @patch("api.routes.v2.agents.store_token_usage")
+    @patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock)
     @patch("api.routes.v2.agents.get_agent")
     def test_agt_064_commit_rejected_tools(self, mock_get_agent, mock_store_token):
         """AGT-064: Commit with all tools rejected."""

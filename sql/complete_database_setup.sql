@@ -87,7 +87,27 @@ CREATE TABLE IF NOT EXISTS token_usage (
     completion_tokens INTEGER,
     total_tokens INTEGER,
     is_estimated BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    -- cost metering (migration 011)
+    run_id VARCHAR(255),
+    api_key_id INTEGER,
+    api_key_name VARCHAR(255),
+    tenant_id VARCHAR(255),
+    request_model VARCHAR(100),
+    provider VARCHAR(50),
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+    model_requests INTEGER NOT NULL DEFAULT 0,
+    tool_calls INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    ttft_ms INTEGER,
+    cost_usd NUMERIC(12, 6),
+    unpriced_models TEXT[],
+    prices_version VARCHAR(20),
+    status VARCHAR(20) NOT NULL DEFAULT 'completed',
+    error TEXT,
+    breakdown JSONB
 );
 
 -- Create indexes for token_usage
@@ -95,6 +115,9 @@ CREATE INDEX IF NOT EXISTS idx_token_usage_agent_id ON token_usage(agent_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_session_id ON token_usage(session_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_user_id ON token_usage(user_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_created_at ON token_usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_token_usage_agent_created ON token_usage(agent_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_token_usage_tenant_created ON token_usage(tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_token_usage_api_key_created ON token_usage(api_key_id, created_at);
 
 -- ====================================
 -- 5. TRIGGERS FOR AUTOMATIC TIMESTAMPS
