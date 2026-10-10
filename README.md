@@ -11,6 +11,7 @@
 [![Latest release](https://img.shields.io/github/v/release/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/releases/latest)
 [![Last commit](https://img.shields.io/github/last-commit/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/commits/main)
 [![Discussions](https://img.shields.io/github/discussions/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/discussions)
+[![Open Source Helpers](https://www.codetriage.com/hivegate-ai/hivegate/badges/users.svg)](https://www.codetriage.com/hivegate-ai/hivegate)
 
 HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/agno-agi/agno). You write the agent, and HiveGate gives it what production needs:
 - per-user sessions
@@ -18,6 +19,7 @@ HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/
 - human approval for risky tool calls
 - multi-agent teams with a supervisor
 - versioned prompts
+- token usage and cost metering
 - tracing
 
 **[Website](https://hivegate.dev)** · **[Docs](https://hivegate.dev/docs/)** · **[Deploy guide](https://hivegate.dev/deploy/)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)** · **[Roadmap](https://github.com/hivegate-ai/hivegate/issues/72)**
@@ -62,6 +64,8 @@ HiveGate is for when your agents act *for your users*, in their own accounts, an
 - **Prompts Service** - Versioned prompt templates with pluggable storage (PostgreSQL, LangSmith)
 - **Token Management** - Secure OAuth token storage with auto-refresh
 - **Toolkits** - Pre-built integrations for Calendar, Email, Contacts, Drive (Google & Microsoft), plus Claude Code and managed-agent providers
+- **Usage & Cost Metering** - Every model call recorded with its tokens and USD cost, queryable through the `/usage` API
+- **Prompt Caching** - Claude models cache tools, the system prompt and the conversation, so repeat input bills at a fraction of the price
 - **Observability** - Pluggable tracing and logging (OpenTelemetry, Sentry, OTLP)
 
 ## Quickstart
@@ -137,6 +141,7 @@ docker compose down -v     # Reset everything
 
 ```
 hivegate/
+├── agents/                 # Model factory, model aliases, pricing
 ├── api/                    # FastAPI application
 │   ├── routes/v2/          # V2 API endpoints (agents, teams, knowledge, tokens,
 │   │                       #   prompts, skills, approvals, engines, targets)
@@ -174,6 +179,7 @@ All endpoints are documented at `/docs`. Key endpoints:
 | Engines | `GET/POST /v2/engines` | Manage supervisor execution engines |
 | Targets | `GET/POST /v2/targets` | Manage supervisor run targets |
 | Approvals | `GET/POST /v2/approvals` | Review and decide on pending job approvals |
+| Usage | `GET /usage/{live,summary,timeseries,calls,prices}` | Token usage and cost per agent, model and time bucket |
 
 ### Authentication
 
@@ -186,6 +192,9 @@ curl -H "X-API-Key: agw_xxxxx" http://localhost:8000/v2/agents
 ```bash
 curl -H "X-Admin-Secret: your-secret" http://localhost:8000/admin/api-keys
 ```
+
+**Usage API** (`/usage/*`): an API key with the `usage:read` scope, or the admin secret.
+A key whose only scope is `usage:read` is refused on `/v2`, so a usage dashboard's key can't call agents.
 
 **Development**: Set `AUTH_DISABLED=true` to bypass authentication.
 
@@ -213,6 +222,31 @@ taking the newest one in the tier (`agents/model_resolver.py`), caches the answe
 for a day, and falls back to a known model for the tier if the vendor can't be
 asked. The resolution is logged (`Model alias anthropic:sonnet-latest -> ...`).
 For example, `DEFAULT_CHAT_MODEL=anthropic:sonnet-latest`.
+
+Claude models run with prompt caching on: the tools and system prompt are cached once per
+agent, and the growing conversation is cached between round trips. Cached input bills at 0.1x
+the input price (cache writes at 1.25x, 5-minute TTL).
+
+## Usage and cost
+
+Every chat, commit, MCP and team run - streamed or not, including failed, refused and
+abandoned ones - writes a row to `token_usage` with its tokens (input, output, cache,
+reasoning), round trips, tool calls, duration and `cost_usd`. Recording runs off the event
+loop and never fails a call.
+
+Costs come from the price table in `agents/pricing.py` (Anthropic, Gemini, OpenAI). A model
+with no known price is reported as unpriced, never guessed; `/usage/summary` counts those in
+`unpriced_calls` and `partially_priced_calls`. Add or correct a price without a redeploy:
+
+```sh
+PRICING_OVERRIDES='{"my-model": {"input": 5, "output": 25}}'   # USD per million tokens
+```
+
+```sh
+curl -H "X-API-Key: agw_xxxxx" "http://localhost:8000/usage/summary?group_by=agent"
+```
+
+`scripts/usage_from_runs.py` builds a read-only per-agent cost report from Agno's stored runs.
 
 ## Toolkits
 
@@ -300,6 +334,7 @@ Platform-specific deployment manifests and guides live under `deploy/`:
 | `DEEPSEEK_API_KEY` | * | DeepSeek API key |
 | `QDRANT_URL` | No | Qdrant vector database URL |
 | `SECRET_TOKEN_ENC_KEY` | No | Token encryption key (auto-generated) |
+| `PRICING_OVERRIDES` | No | JSON of per-model prices for [usage metering](#usage-and-cost) |
 
 \* At least one LLM API key is required.
 
@@ -309,7 +344,7 @@ See the [Observability](#observability) section for tracing/logging configuratio
 
 | Schema | Tables | Purpose |
 |--------|--------|---------|
-| `public` | agent_info, team_info, team_agent, knowledge_entries, user_tokens, api_keys | Core data |
+| `public` | agent_info, team_info, team_agent, knowledge_entries, user_tokens, api_keys, token_usage | Core data |
 | `prompts` | prompts | Prompt templates |
 | `ai` | (auto-created) | Agno agent sessions & memories |
 
