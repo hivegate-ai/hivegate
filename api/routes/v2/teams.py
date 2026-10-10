@@ -540,7 +540,7 @@ async def get_team_info_v2(team_id: str, db: Session = Depends(get_db)):
     # Get team data from database
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     # Get team agents
@@ -579,7 +579,7 @@ async def team_response_streamer(
     Yields:
         SSE-formatted event strings with team response chunks including status, run_id, and tools
     """
-    logging.debug(f"Starting team streaming response for message: {message[:50]}...")
+    logging.debug(f"Starting team streaming response for message: {_log_safe(message[:50])}...")
     run_response = team.arun(message, stream=True)  # Returns async generator, don't await
     chunk_count = 0
     full_output_text = ""
@@ -770,20 +770,20 @@ async def create_team_run_v2(
     Returns:
         Either a streaming response or a complete TeamRunResponse
     """
-    logging.info(f"Creating v2 team run for team_id: {team_id}")
-    logging.debug(f"TeamRunRequest: {body}")
+    logging.info(f"Creating v2 team run for team_id: {_log_safe(team_id)}")
+    logging.debug(f"TeamRunRequest: {_log_safe(body)}")
 
     # Validate team exists in database first
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
         # Get team agents
         team_agents_db = get_team_agents(db, team_id)
         if not team_agents_db:
-            logging.error(f"Team {team_id} has no agents")
+            logging.error(f"Team {_log_safe(team_id)} has no agents")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Team {team_id} has no agents")
 
         # Check team mode — supervisor teams use the supervisor team builder
@@ -846,12 +846,12 @@ async def create_team_run_v2(
                 db_url=db_url,
                 debug_mode=False,
             )
-        logging.debug(f"Successfully created enhanced team: {team_id}")
+        logging.debug(f"Successfully created enhanced team: {_log_safe(team_id)}")
 
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"Error creating team {team_id}: {str(e)}")
+        logging.error(f"Error creating team {_log_safe(team_id)}: {_log_safe(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     if body.stream:
@@ -939,7 +939,7 @@ async def commit_team_run_v2(
         TeamRunResponse with continued execution results
     """
     try:
-        logging.info(f"Commit request for team {team_id}, run_id: {body.run_id}")
+        logging.info(f"Commit request for team {_log_safe(team_id)}, run_id: {_log_safe(body.run_id)}")
 
         # Check if any tool has confirmed=false (user denial)
         tools_with_confirmation = [tool for tool in body.updated_tools if tool.get("confirmed") is not None]
@@ -950,10 +950,12 @@ async def commit_team_run_v2(
         # Retrieve cached run
         with _team_run_cache_lock:
             if body.run_id not in _team_run_cache:
-                logging.error(f"Run ID {body.run_id} not found in cache")
+                logging.error(f"Run ID {_log_safe(body.run_id)} not found in cache")
                 # If all tools are denied and run_id not found, return denial response without error
                 if all_denied:
-                    logging.info(f"Run ID {body.run_id} not found but all tools denied - returning denial response")
+                    logging.info(
+                        f"Run ID {_log_safe(body.run_id)} not found but all tools denied - returning denial response"
+                    )
                     return TeamRunResponse(
                         content="Tool execution cancelled by user.",
                         team_id=team_id,
@@ -971,7 +973,7 @@ async def commit_team_run_v2(
 
         # Check if user denied all tools
         if all_denied:
-            logging.info(f"User denied all tools for run_id: {body.run_id}")
+            logging.info(f"User denied all tools for run_id: {_log_safe(body.run_id)}")
             # Clean up run cache
             with _team_run_cache_lock:
                 if body.run_id in _team_run_cache:
@@ -1070,7 +1072,7 @@ async def commit_team_run_v2(
     except HTTPException:
         raise
     except Exception as e:
-        logging.exception(f"Unexpected error in commit_team_run_v2 for team {team_id}: {str(e)}")
+        logging.exception(f"Unexpected error in commit_team_run_v2 for team {_log_safe(team_id)}: {_log_safe(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error occurred while committing team run for team {team_id}",
@@ -1094,7 +1096,7 @@ async def get_team_sessions_v2(team_id: str, db: Session = Depends(get_db)):
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
@@ -1176,7 +1178,7 @@ async def get_team_session_v2(team_id: str, session_id: str, db: Session = Depen
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
@@ -1254,7 +1256,7 @@ async def delete_team_session_v2(team_id: str, session_id: str, db: Session = De
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
@@ -1401,7 +1403,7 @@ async def delete_team_v2(team_id: str, soft: bool = False, db: Session = Depends
             # Soft delete: mark as inactive
             result = soft_delete_team_info(db, team_id)
             if not result:
-                logging.error(f"Team {team_id} not found in database")
+                logging.error(f"Team {_log_safe(team_id)} not found in database")
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
             logging.info(f"Team {team_id} soft deleted successfully")
@@ -1410,7 +1412,7 @@ async def delete_team_v2(team_id: str, soft: bool = False, db: Session = Depends
             # Hard delete: permanently remove from database
             result = delete_team_info(db, team_id)
             if not result:
-                logging.error(f"Team {team_id} not found in database")
+                logging.error(f"Team {_log_safe(team_id)} not found in database")
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
             logging.info(f"Team {team_id} hard deleted successfully")
@@ -1442,7 +1444,7 @@ async def get_team_memories_v2(team_id: str, db: Session = Depends(get_db)):
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
@@ -1501,7 +1503,7 @@ async def get_team_members_v2(team_id: str, db: Session = Depends(get_db)):
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     # Get team agents
@@ -1539,7 +1541,7 @@ async def add_team_member_v2(team_id: str, body: AddMemberRequest, db: Session =
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     # Validate agent exists
@@ -1602,7 +1604,7 @@ async def remove_team_member_v2(team_id: str, agent_id: str, db: Session = Depen
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     try:
@@ -1648,7 +1650,7 @@ async def update_team_member_v2(team_id: str, agent_id: str, body: UpdateMemberR
     # Validate team exists
     db_team = get_team_info(db, team_id)
     if not db_team:
-        logging.error(f"Team {team_id} not found in database")
+        logging.error(f"Team {_log_safe(team_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Team {team_id} not found")
 
     # Validate at least one field is provided for update

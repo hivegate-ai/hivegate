@@ -404,7 +404,7 @@ async def get_agent_info_v2(agent_id: str, db: Session = Depends(get_db)):
     # Get agent data from database
     db_agent = get_agent_info(db, agent_id)
     if not db_agent:
-        logging.error(f"Agent {agent_id} not found in database")
+        logging.error(f"Agent {_log_safe(agent_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found")
 
     # Fetch template from prompt service
@@ -690,7 +690,7 @@ async def chat_response_streamer_v2(
     Yields:
         SSE-formatted event strings with agent response chunks including status, run_id, and tools
     """
-    logging.debug(f"Starting v2 streaming response for message: {body.message[:50]}...")
+    logging.debug(f"Starting v2 streaming response for message: {_log_safe(body.message[:50])}...")
 
     # Build knowledge_filters safely (handle None tenant_profile)
     # Prefix with "meta_data." since Qdrant stores metadata as nested field
@@ -725,7 +725,7 @@ async def chat_response_streamer_v2(
             first_bytes = content_bytes[:20].hex()
 
             logging.info(f"[STREAMING] File data: size={img_size_mb:.2f}MB, hash={img_hash}, first_bytes={first_bytes}")
-            logging.info(f"[STREAMING] File mime_type={mime_type}")
+            logging.info(f"[STREAMING] File mime_type={_log_safe(mime_type)}")
 
             # Check if it's an image or PDF and create appropriate object with raw bytes
             if mime_type.startswith("image/"):
@@ -847,7 +847,7 @@ async def get_agent(
     # Validate agent exists in database first
     db_agent = get_agent_info(db, agent_id)
     if not db_agent:
-        logging.error(f"Agent {agent_id} not found in database")
+        logging.error(f"Agent {_log_safe(agent_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found")
     # Fetch prompt template, respecting PROMPT_STORAGE_BACKEND (mirrors
     # agents.v2_selector.get_v2_agent): use local postgres storage when that's
@@ -862,7 +862,7 @@ async def get_agent(
         if not prompt_data:
             prompt_data = _get_prompt_from_local_storage(db, str(db_agent.prompt_service_id))
     if not prompt_data:
-        logging.error(f"Failed to fetch prompt for agent {agent_id}")
+        logging.error(f"Failed to fetch prompt for agent {_log_safe(agent_id)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch prompt template for agent {agent_id}",
@@ -902,8 +902,8 @@ async def chat_with_agent_v2(
     # Who is calling, for the per-call cost record (api/services/usage.py).
     usage_ctx = usage_service.context_for(agent_id, body, api_key)
     try:
-        logging.info(f"Creating v2 chat request for agent_id: {agent_id}")
-        logging.debug(f"ChatRequest: {body}")
+        logging.info(f"Creating v2 chat request for agent_id: {_log_safe(agent_id)}")
+        logging.debug(f"ChatRequest: {_log_safe(body)}")
 
         # Get or create cached agent (same for all messages including multimodal)
         agent, prompt_data, cache_key, agent_config = await get_agent(
@@ -1023,7 +1023,7 @@ async def chat_with_agent_v2(
                 media_type="text/event-stream",
             )
         else:
-            logging.info(f"Processing v2 non-streaming request for agent: {agent_id}")
+            logging.info(f"Processing v2 non-streaming request for agent: {_log_safe(agent_id)}")
 
             # Build knowledge_filters safely (handle None tenant_profile)
             # Prefix with "meta_data." since Qdrant stores metadata as nested field
@@ -1058,7 +1058,7 @@ async def chat_with_agent_v2(
                     first_bytes = content_bytes[:20].hex()
 
                     logging.info(f"File data: size={img_size_mb:.2f}MB, hash={img_hash}, first_bytes={first_bytes}")
-                    logging.info(f"File mime_type={mime_type}")
+                    logging.info(f"File mime_type={_log_safe(mime_type)}")
 
                     # Check if it's an image or PDF and create appropriate object with raw bytes
                     if mime_type.startswith("image/"):
@@ -1136,7 +1136,7 @@ async def chat_with_agent_v2(
         # say which, rather than a 500 that reads like a gateway bug.
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except Exception as e:
-        logging.exception(f"Unexpected error in chat_with_agent_v2 for agent {agent_id}: {str(e)}")
+        logging.exception(f"Unexpected error in chat_with_agent_v2 for agent {_log_safe(agent_id)}: {_log_safe(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error occurred while chatting with agent {agent_id}",
@@ -1281,7 +1281,7 @@ async def delete_agent_v2(agent_id: str, db: Session = Depends(get_db)):
     # Check if agent exists in database
     db_agent = get_agent_info(db, agent_id)
     if not db_agent:
-        logging.error(f"Agent {agent_id} not found in database")
+        logging.error(f"Agent {_log_safe(agent_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found")
 
     try:
@@ -1343,7 +1343,7 @@ async def commit_agent_chat_v2(
         ChatResponse with continued execution results
     """
     try:
-        logging.info(f"Commit request for agent {agent_id}, run_id: {body.run_id}")
+        logging.info(f"Commit request for agent {_log_safe(agent_id)}, run_id: {_log_safe(body.run_id)}")
 
         # Check if any tool has confirmed=false (user denial)
         # Only consider tools that have an explicit confirmed field (ignore None/missing)
@@ -1354,10 +1354,12 @@ async def commit_agent_chat_v2(
 
         # Retrieve cached run
         if body.run_id not in _run_cache:
-            logging.error(f"Run ID {body.run_id} not found in cache")
+            logging.error(f"Run ID {_log_safe(body.run_id)} not found in cache")
             # If all tools are denied and run_id not found, return denial response without error
             if all_denied:
-                logging.info(f"Run ID {body.run_id} not found but all tools denied - returning denial response")
+                logging.info(
+                    f"Run ID {_log_safe(body.run_id)} not found but all tools denied - returning denial response"
+                )
                 return ChatResponse(
                     content="Tool execution cancelled by user.",
                     agent_id=agent_id,
@@ -1375,7 +1377,7 @@ async def commit_agent_chat_v2(
 
         # Check if user denied all tools (confirmed=false)
         if all_denied:
-            logging.info(f"User denied all tools for run_id: {body.run_id}")
+            logging.info(f"User denied all tools for run_id: {_log_safe(body.run_id)}")
             # Clean up run cache
             if body.run_id in _run_cache:
                 del _run_cache[body.run_id]
@@ -1452,7 +1454,7 @@ async def commit_agent_chat_v2(
         # say which, rather than a 500 that reads like a gateway bug.
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except Exception as e:
-        logging.exception(f"Unexpected error in commit_agent_chat_v2 for agent {agent_id}: {str(e)}")
+        logging.exception(f"Unexpected error in commit_agent_chat_v2 for agent {_log_safe(agent_id)}: {_log_safe(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error occurred while committing chat with agent {agent_id}",
