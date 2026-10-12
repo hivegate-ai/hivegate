@@ -257,7 +257,7 @@ The `toolkits/` package provides Agno agent toolkits for external service integr
 | CalendarToolkit | Google Calendar, Microsoft Calendar | schedule_meeting, list_events, cancel_meeting |
 | EmailToolkit | Gmail, Outlook | send_email, search_emails, create_draft |
 | ContactsToolkit | Google Contacts, Microsoft Contacts | create_contact, search_contacts, list_contacts |
-| DriveToolkit | Google Drive, OneDrive | list_files, read_file, upload_file |
+| DriveToolkit | Google Drive, OneDrive | list_files, get_file_info, read_file |
 
 All toolkits support:
 - Confirmation-based workflow (user reviews before execution)
@@ -333,7 +333,7 @@ Platform-specific deployment manifests and guides live under `deploy/`:
 | `ZAI_API_KEY` | * | Z.ai API key (GLM models) |
 | `DEEPSEEK_API_KEY` | * | DeepSeek API key |
 | `QDRANT_URL` | No | Qdrant vector database URL |
-| `SECRET_TOKEN_ENC_KEY` | No | Token encryption key (auto-generated) |
+| `SECRET_TOKEN_ENC_KEY` | For OAuth tokens | Fernet key that encrypts stored OAuth tokens. Storing a token fails without it. Generate one with `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` |
 | `PRICING_OVERRIDES` | No | JSON of per-model prices for [usage metering](#usage-and-cost) |
 
 \* At least one LLM API key is required.

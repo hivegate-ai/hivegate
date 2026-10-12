@@ -4,6 +4,10 @@ import datetime
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from agno.run.base import RunStatus
+
+import api.routes.v2.teams as teams_module
+
 from db.db_models import TeamAgentDB, TeamInfoDB
 from tests.test_utils import create_test_client
 
@@ -173,7 +177,7 @@ class TestSupervisorTeamRun(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.content = ""
         mock_response.metrics = None
-        mock_response.status = "paused"
+        mock_response.status = RunStatus.paused
         mock_response.run_id = "run-paused-456"
         mock_response.tools = [mock_tool]
 
@@ -186,12 +190,15 @@ class TestSupervisorTeamRun(unittest.TestCase):
             "stream": False,
         }
 
-        with patch("api.routes.v2.teams.register_pending_approval"):
+        with patch("api.routes.v2.teams.register_pending_approval") as mock_register:
             response = self.client.post("/v2/teams/sup-team/runs", json=run_request)
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["status"], "paused")
+        self.assertEqual(data["status"], "PAUSED")
+        # A paused run must be cached for /runs/commit and its tool registered for approval.
+        self.assertIs(teams_module._team_run_cache.pop("run-paused-456"), mock_response)
+        mock_register.assert_called_once()
         self.assertEqual(data["run_id"], "run-paused-456")
         self.assertIsNotNone(data["tools"])
         self.assertEqual(len(data["tools"]), 1)
