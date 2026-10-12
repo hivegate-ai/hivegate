@@ -2,7 +2,7 @@
 
 **Run your Agno agents as a production API.**
 
-[![HiveGate](https://hivegate.dev/assets/og-image.png)](https://hivegate.dev)
+[![HiveGate](https://hivegate.dev/assets/og-image.png)](https://hivegate.dev/?utm_source=github-readme)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -22,7 +22,7 @@ HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/
 - token usage and cost metering
 - tracing
 
-**[Website](https://hivegate.dev)** · **[Docs](https://hivegate.dev/docs/)** · **[Deploy guide](https://hivegate.dev/deploy/)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)** · **[Roadmap](https://github.com/hivegate-ai/hivegate/issues/72)**
+**[Website](https://hivegate.dev/?utm_source=github-readme)** · **[Docs](https://hivegate.dev/docs/?utm_source=github-readme)** · **[Deploy guide](https://hivegate.dev/deploy/?utm_source=github-readme)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)** · **[Roadmap](https://github.com/hivegate-ai/hivegate/issues/72)**
 
 ```sh
 git clone https://github.com/hivegate-ai/hivegate && cd hivegate
