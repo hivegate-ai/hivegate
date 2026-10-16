@@ -2,7 +2,7 @@
 
 **Run your Agno agents as a production API.**
 
-[![HiveGate](https://hivegate.dev/assets/og-image.png)](https://hivegate.dev)
+[![HiveGate](https://hivegate.dev/assets/og-image.png)](https://hivegate.dev/?utm_source=github-readme)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -22,7 +22,7 @@ HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/
 - token usage and cost metering
 - tracing
 
-**[Website](https://hivegate.dev)** · **[Docs](https://hivegate.dev/docs/)** · **[Deploy guide](https://hivegate.dev/deploy/)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)** · **[Roadmap](https://github.com/hivegate-ai/hivegate/issues/72)**
+**[Website](https://hivegate.dev/?utm_source=github-readme)** · **[Docs](https://hivegate.dev/docs/?utm_source=github-readme)** · **[Deploy guide](https://hivegate.dev/deploy/?utm_source=github-readme)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)** · **[Roadmap](https://github.com/hivegate-ai/hivegate/issues/72)**
 
 ```sh
 git clone https://github.com/hivegate-ai/hivegate && cd hivegate
@@ -257,7 +257,7 @@ The `toolkits/` package provides Agno agent toolkits for external service integr
 | CalendarToolkit | Google Calendar, Microsoft Calendar | schedule_meeting, list_events, cancel_meeting |
 | EmailToolkit | Gmail, Outlook | send_email, search_emails, create_draft |
 | ContactsToolkit | Google Contacts, Microsoft Contacts | create_contact, search_contacts, list_contacts |
-| DriveToolkit | Google Drive, OneDrive | list_files, read_file, upload_file |
+| DriveToolkit | Google Drive, OneDrive | list_files, get_file_info, read_file |
 
 All toolkits support:
 - Confirmation-based workflow (user reviews before execution)
@@ -333,7 +333,7 @@ Platform-specific deployment manifests and guides live under `deploy/`:
 | `ZAI_API_KEY` | * | Z.ai API key (GLM models) |
 | `DEEPSEEK_API_KEY` | * | DeepSeek API key |
 | `QDRANT_URL` | No | Qdrant vector database URL |
-| `SECRET_TOKEN_ENC_KEY` | No | Token encryption key (auto-generated) |
+| `SECRET_TOKEN_ENC_KEY` | For OAuth tokens | Fernet key that encrypts stored OAuth tokens. Storing a token fails without it. Generate one with `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` |
 | `PRICING_OVERRIDES` | No | JSON of per-model prices for [usage metering](#usage-and-cost) |
 
 \* At least one LLM API key is required.

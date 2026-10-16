@@ -9,6 +9,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from agno.db.postgres import PostgresDb
 from agno.memory import MemoryManager
 from agno.models.google import Gemini
+from agno.run.base import RunStatus
 
 # agno.models.metrics.Metrics was only a backward-compat alias of RunMetrics, and
 # agno 3 removed it. RunMetrics lives in agno.metrics from 2.6 through 3.x.
@@ -896,8 +897,8 @@ async def create_team_run_v2(
                 }
                 tools_dict.append(tool_dict)
 
-        # Cache the run for later commit if status is paused
-        if response_run_id and response_status == "paused":
+        # Cache the run for later commit if status is paused. RunStatus.paused is "PAUSED".
+        if response_run_id and response_status == RunStatus.paused:
             with _team_run_cache_lock:
                 _team_run_cache[response_run_id] = response
                 logging.debug(f"Cached team run {response_run_id} for commit")
