@@ -6,7 +6,7 @@ from api.settings import ApiSettings
 
 
 class TestDebugModeConfiguration(unittest.TestCase):
-    """Test cases for TESTING-based debug mode configuration."""
+    """Test cases for AGENT_DEBUG_MODE / TESTING debug mode configuration."""
 
     def test_debug_mode_disabled_when_testing_false(self):
         """Test that debug mode is disabled when TESTING=false."""
@@ -33,14 +33,40 @@ class TestDebugModeConfiguration(unittest.TestCase):
             self.assertFalse(settings.agent_debug_mode)
 
     def test_debug_mode_ignores_environment_variable(self):
-        """Test that debug mode ignores ENVIRONMENT variable and only uses TESTING."""
-        # Even with development environment, should be false if TESTING=false
-        with patch.dict(os.environ, {"ENVIRONMENT": "development", "TESTING": "false"}):
+        """Test that debug mode ignores ENVIRONMENT and uses AGENT_DEBUG_MODE / TESTING."""
+        with patch.dict(
+            os.environ,
+            {"ENVIRONMENT": "development", "TESTING": "false", "AGENT_DEBUG_MODE": "false"},
+            clear=False,
+        ):
             settings = ApiSettings()
             self.assertFalse(settings.agent_debug_mode)
 
-        # Even with production environment, should be true if TESTING=true
-        with patch.dict(os.environ, {"ENVIRONMENT": "production", "TESTING": "true"}):
+        with patch.dict(
+            os.environ,
+            {"ENVIRONMENT": "production", "TESTING": "false", "AGENT_DEBUG_MODE": "true"},
+            clear=False,
+        ):
+            settings = ApiSettings()
+            self.assertTrue(settings.agent_debug_mode)
+
+    def test_agent_debug_mode_env_true(self):
+        """AGENT_DEBUG_MODE=true enables debug mode even when TESTING is unset/false."""
+        with patch.dict(os.environ, {"AGENT_DEBUG_MODE": "true", "TESTING": "false"}, clear=False):
+            settings = ApiSettings()
+            self.assertTrue(settings.agent_debug_mode)
+
+    def test_agent_debug_mode_env_false_overrides_testing(self):
+        """AGENT_DEBUG_MODE=false keeps debug off even if TESTING=true."""
+        with patch.dict(os.environ, {"AGENT_DEBUG_MODE": "false", "TESTING": "true"}, clear=False):
+            settings = ApiSettings()
+            self.assertFalse(settings.agent_debug_mode)
+
+    def test_agent_debug_mode_falls_back_to_testing(self):
+        """When AGENT_DEBUG_MODE is unset, TESTING still controls debug mode."""
+        env = {k: v for k, v in os.environ.items() if k != "AGENT_DEBUG_MODE"}
+        env["TESTING"] = "true"
+        with patch.dict(os.environ, env, clear=True):
             settings = ApiSettings()
             self.assertTrue(settings.agent_debug_mode)
 
