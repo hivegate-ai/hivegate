@@ -319,7 +319,7 @@ class TestV2KnowledgeAPI(unittest.TestCase):
         """Test successful creation of collection knowledge entry."""
         # Create collection-level entry
         project_entry = self.sample_knowledge_entry
-        project_entry.collection_id = self.test_collection_id  # type: ignore[assignment]  # type: ignore[assignment]
+        project_entry.collection_id = self.test_collection_id  # type: ignore[assignment]
         project_entry.file_type = "project"  # type: ignore[assignment]
         mock_create.return_value = project_entry
 
