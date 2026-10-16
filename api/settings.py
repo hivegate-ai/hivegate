@@ -43,8 +43,11 @@ class ApiSettings(BaseSettings):
     bright_data_web_unlocker_zone: str = Field(default="web_unlocker1", description="Bright Data Web Unlocker zone")
     bright_data_serp_zone: str = Field(default="serp_api1", description="Bright Data SERP zone")
 
-    # Agent debug mode - enabled only when TESTING=true
-    agent_debug_mode: bool = Field(default=False, description="Enable debug mode for agents")
+    # Agent debug mode — AGENT_DEBUG_MODE, falling back to TESTING for compatibility
+    agent_debug_mode: bool = Field(
+        default=False,
+        description="Enable debug mode for agents (AGENT_DEBUG_MODE, else TESTING)",
+    )
 
     # Guardrails - prompt injection and PII detection
     enable_guardrails: bool = Field(
@@ -114,8 +117,13 @@ class ApiSettings(BaseSettings):
 
     @field_validator("agent_debug_mode", mode="before")
     def set_agent_debug_mode(cls, agent_debug_mode, info: FieldValidationInfo):
-        # Enable debug mode only when TESTING=true
-        return str_to_bool(os.environ.get("TESTING", "false"))
+        # Prefer AGENT_DEBUG_MODE; fall back to TESTING for existing test setups.
+        return str_to_bool(
+            os.environ.get(
+                "AGENT_DEBUG_MODE",
+                os.environ.get("TESTING", "false"),
+            )
+        )
 
     @field_validator("enable_guardrails", mode="before")
     def set_enable_guardrails(cls, enable_guardrails, info: FieldValidationInfo):
