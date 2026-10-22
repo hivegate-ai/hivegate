@@ -29,6 +29,7 @@ from agents.agent import get_agent as get_agent_impl
 from agents.agent import slug_to_table_name
 from agents.model_factory import ProviderNotConfiguredError
 from agents.model_resolver import resolve_model_id
+from agents.provider_models import humanize_billing_error
 from agents.v2_selector import _get_prompt_from_local_storage
 from api.services import usage as usage_service
 from api.services.access_token import fetch_access_token, has_access_tokens_batch  # noqa: F401
@@ -632,6 +633,7 @@ async def commit_response_streamer_v2(
             # Convert chunk to dict
             event_data = _event_to_dict(chunk)
             collector.observe(event_data)
+            humanize_billing_error(event_data)
 
             # Only text content is part of the answer. Reasoning (and some other)
             # events can carry a dict `content`; str-concatenating those raised
@@ -768,6 +770,7 @@ async def chat_response_streamer_v2(
             # Convert chunk to dict
             event_data = _event_to_dict(chunk)
             collector.observe(event_data)
+            humanize_billing_error(event_data)
 
             # Only text content is part of the answer. Reasoning (and some other)
             # events can carry a dict `content`; str-concatenating those raised

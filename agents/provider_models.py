@@ -19,7 +19,7 @@ reasoning path by class name ("Claude", "Gemini", "DeepSeek", "OpenAIResponses")
 renamed subclass would silently lose it - see agents/claude_refusal.py.
 """
 
-from typing import Any, AsyncIterator, Iterator
+from typing import Any, AsyncIterator, Dict, Iterator
 
 from agno.exceptions import ModelProviderError
 from agno.models.deepseek import DeepSeek
@@ -28,7 +28,22 @@ from agno.models.openai.like import OpenAILike
 from agno.models.xai import xAI
 
 # Provider messages that mean "this account cannot pay", however they are coded.
-_BILLING_MARKERS = ("insufficient balance", "insufficient_quota", "used all available credits", "please recharge")
+# Anthropic sends its out-of-credits error as a plain 400 invalid_request_error.
+_BILLING_MARKERS = (
+    "insufficient balance",
+    "insufficient_quota",
+    "used all available credits",
+    "please recharge",
+    "credit balance is too low",
+)
+
+# What a client is shown instead of the provider's raw billing error, and the stable
+# code it can branch on (the message is for people and may change).
+BILLING_ERROR_CODE = "provider_billing"
+BILLING_ERROR_MESSAGE = (
+    "The AI provider account behind this agent is out of credits, so it cannot answer "
+    "right now. The gateway's owner needs to top up the provider account."
+)
 
 
 class StreamInterruptedError(ModelProviderError):
@@ -43,11 +58,25 @@ class StreamInterruptedError(ModelProviderError):
         )
 
 
+def is_billing_message(text: Any) -> bool:
+    lowered = str(text or "").lower()
+    return any(marker in lowered for marker in _BILLING_MARKERS)
+
+
 def is_billing_error(error: ModelProviderError) -> bool:
-    if error.status_code == 402:
-        return True
-    message = str(error.message).lower()
-    return any(marker in message for marker in _BILLING_MARKERS)
+    return error.status_code == 402 or is_billing_message(error.message)
+
+
+def humanize_billing_error(event_data: Dict[str, Any]) -> None:
+    """Replace a provider's raw out-of-credits run error with a message a person can act on.
+
+    agno puts str(exception) in a RunError's content, so a chat client would otherwise
+    show e.g. Anthropic's "Error code: 400 - {'type': 'error', ...}" dump verbatim. Call
+    it after usage has observed the event, so token_usage keeps the provider's wording.
+    """
+    if event_data.get("event") in ("RunError", "TeamRunError") and is_billing_message(event_data.get("content")):
+        event_data["content"] = BILLING_ERROR_MESSAGE
+        event_data["error_code"] = BILLING_ERROR_CODE
 
 
 class StreamRestartGuard:

@@ -8,7 +8,22 @@ from agno.exceptions import ModelProviderError
 from agno.models.google import Gemini
 
 from agents.model_factory import create_model
-from agents.provider_models import GuardedGemini, StreamInterruptedError, is_billing_error
+from agents.provider_models import (
+    BILLING_ERROR_CODE,
+    BILLING_ERROR_MESSAGE,
+    GuardedGemini,
+    StreamInterruptedError,
+    humanize_billing_error,
+    is_billing_error,
+)
+
+# str() of the agno ModelProviderError wrapping Anthropic's out-of-credits APIStatusError,
+# as it reached the cash helper's chat on 2026-10-22.
+ANTHROPIC_NO_CREDITS = (
+    "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', "
+    "'message': 'Your credit balance is too low to access the Anthropic API. Please go to "
+    "Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011CfqMGQpmcVQAjALGv9Aef'}"
+)
 
 
 def _model() -> GuardedGemini:
@@ -93,6 +108,8 @@ class TestBillingErrorsAreNotRetried(unittest.TestCase):
             is_billing_error(_error(429, "Insufficient balance or no resource package. Please recharge."))
         )  # Z.ai
         self.assertTrue(is_billing_error(_error(403, "Your team has either used all available credits")))  # xAI
+        self.assertTrue(is_billing_error(_error(400, ANTHROPIC_NO_CREDITS)))  # Anthropic: a plain 400
+        self.assertFalse(is_billing_error(_error(400, "messages: at least one message is required")))
         self.assertFalse(is_billing_error(_error(429, "Rate limit exceeded")))
         self.assertFalse(is_billing_error(_error(503)))
 
@@ -145,3 +162,25 @@ class TestClassNamesAreKept(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBillingErrorIsShownPlainly(unittest.TestCase):
+    def test_run_error_with_raw_provider_dump_is_replaced(self):
+        for event in ("RunError", "TeamRunError"):
+            with self.subTest(event=event):
+                data = {"event": event, "content": ANTHROPIC_NO_CREDITS, "error_type": "model_provider_error"}
+                humanize_billing_error(data)
+                self.assertEqual(data["content"], BILLING_ERROR_MESSAGE)
+                self.assertEqual(data["error_code"], BILLING_ERROR_CODE)
+                self.assertEqual(data["error_type"], "model_provider_error")  # agno's own field untouched
+
+    def test_other_events_and_errors_are_left_alone(self):
+        for data in (
+            {"event": "RunError", "content": "Claude declined the request (stop_reason=refusal, category=cyber)"},
+            {"event": "RunContent", "content": "Your credit balance is too low, so save more"},
+            {"event": "RunError", "content": None},
+        ):
+            with self.subTest(data=data):
+                before = dict(data)
+                humanize_billing_error(data)
+                self.assertEqual(data, before)

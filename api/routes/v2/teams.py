@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
+from agents.provider_models import humanize_billing_error
 from agents.hitl import requirements_for
 from agents.model_resolver import resolve_model_id
 from agents.v2_selector import get_agent
@@ -609,6 +610,7 @@ async def team_response_streamer(
                 logging.warning(f"Skipping chunk that couldn't be serialized: {event_data}")
                 continue
             collector.observe(event_data)
+            humanize_billing_error(event_data)
 
             # Accumulate the answer text
             if isinstance(event_data.get("content"), str):
@@ -713,6 +715,7 @@ async def commit_team_response_streamer(
             # Convert chunk to dict
             event_data = _event_to_dict(chunk)
             collector.observe(event_data)
+            humanize_billing_error(event_data)
 
             # Accumulate the answer text
             if isinstance(event_data.get("content"), str):
