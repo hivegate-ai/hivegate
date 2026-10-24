@@ -34,7 +34,7 @@ fastapi-cli==0.0.32
 fastapi-cloud-cli==0.26.0
 fastar==0.12.0
 fastmcp==4.1.0
-fastmcp-slim==4.1.0
+fastmcp-slim==4.1.2
 google-api-core==2.42.0
 google-auth==2.61.0
 google-cloud-core==2.8.0
