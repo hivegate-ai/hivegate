@@ -18,7 +18,7 @@ dependencies = [
   "cachetools>=7.2.1",
   "types-cachetools",
   "qdrant-client>=1.9.0",
-  "pypdf>=6.20.0",
+  "pypdf>=6.21.4",
   # Security constraints for transitive dependencies
   "starlette>=1.3.1",
   "urllib3>=2.6.3",
@@ -34,7 +34,7 @@ dependencies = [
   "types-dateparser",
   "openai>=3.28.0",
   "anthropic>=1.13.0",
-  "Pillow>=12.2.0",
+  "Pillow>=13.0.0",
   "prompt-toolkit>=3.0.43",
   # Observability - OpenTelemetry (CNCF standard)
   "opentelemetry-api>=1.45.1",
@@ -55,7 +55,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["mypy", "ruff", "types-requests", "types-cachetools"]
 test = ["pytest", "pytest-asyncio", "pytest-cov", "httpx", "coverage", "testcontainers", "requests"]
-langsmith = ["langsmith>=0.14.3", "langchain-core>=1.6.6"]
+langsmith = ["langsmith>=0.14.11", "langchain-core>=1.6.11"]
 
 [build-system]
 requires = ["setuptools>=84.0.0", "setuptools-scm>=10.3.4"]
