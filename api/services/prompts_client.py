@@ -93,7 +93,7 @@ class PromptsServiceClient:
             return prompts_list_cache["all"]
 
         if not self._is_configured():
-            logging.error("PromptsServiceClient not properly configured")
+            logging.debug("PromptsServiceClient not properly configured")
             return []
 
         if not self.prompts_service_url:
@@ -145,7 +145,7 @@ class PromptsServiceClient:
         record_cache_miss(name)
 
         if not self._is_configured():
-            logging.error("PromptsServiceClient not properly configured")
+            logging.debug("PromptsServiceClient not properly configured")
             return None
 
         try:
@@ -378,14 +378,7 @@ class PromptsServiceClient:
         Returns:
             bool: True if successful, False otherwise
         """
-        from cache.prompts_cache import (
-            cache_statistics,
-            calculate_prompt_hash,
-            get_cached_prompt_hash,
-            store_prompt_with_hash,
-        )
-
-        logging.info("Starting smart refresh with change detection")
+        logging.info("Starting smart refresh of all prompts")
 
         try:
             # Get current list of prompt names
@@ -410,7 +403,7 @@ class PromptsServiceClient:
             concurrency = int(os.environ.get("PROMPTS_BATCH_CONCURRENCY", DEFAULT_BATCH_CONCURRENCY))
             logging.info(f"Smart refreshing {len(current_prompt_names)} prompts (concurrency: {concurrency})")
 
-            # Batch fetch all prompts with reduced concurrency
+            # Smart refresh: check hash before updating
             with ThreadPoolExecutor(max_workers=concurrency) as executor:
                 future_to_name = {
                     executor.submit(self._fetch_single_prompt, name): name for name in current_prompt_names
@@ -418,32 +411,27 @@ class PromptsServiceClient:
 
                 updated_count = 0
                 skipped_count = 0
-
                 for future in future_to_name:
                     name = future_to_name[future]
                     try:
                         fresh_prompt = future.result()
-                        if not fresh_prompt:
-                            continue
+                        if fresh_prompt:
+                            # Check if content has changed using hash
+                            from cache.prompts_cache import get_cached_prompt_hash, store_prompt_with_hash
 
-                        # Calculate hash of fresh prompt
-                        fresh_hash = calculate_prompt_hash(fresh_prompt)
+                            cached_hash = get_cached_prompt_hash(name)
+                            fresh_hash = store_prompt_with_hash(name, fresh_prompt, return_hash=True)
 
-                        # Get cached hash
-                        cached_hash = get_cached_prompt_hash(name)
-
-                        if cached_hash != fresh_hash:
-                            # Content has changed, update cache
-                            store_prompt_with_hash(name, fresh_prompt, fresh_hash)
-                            updated_count += 1
-                            logging.debug(
-                                f"Updated prompt '{name}' (hash changed: {cached_hash[:8] if cached_hash else 'none'} -> {fresh_hash[:8]})"
-                            )
-                        else:
-                            # Content unchanged, just extend TTL
-                            extend_cache_ttl(name)
-                            skipped_count += 1
-                            logging.debug(f"Skipped prompt '{name}' (unchanged)")
+                            if cached_hash != fresh_hash:
+                                updated_count += 1
+                                logging.debug(
+                                    f"Updated prompt '{name}' (hash changed: {cached_hash[:8] if cached_hash else 'none'} -> {fresh_hash[:8]})"
+                                )
+                            else:
+                                # Content unchanged, just extend TTL
+                                extend_cache_ttl(name)
+                                skipped_count += 1
+                                logging.debug(f"Skipped prompt '{name}' (unchanged)")
 
                     except Exception as e:
                         logging.error(f"Error processing smart refresh future for prompt '{name}': {e}")
@@ -472,9 +460,14 @@ class PromptsServiceClient:
         Returns:
             bool: True if cache is ready, False if timeout
         """
-        from cache.prompts_cache import wait_for_cache_ready
+        import asyncio
 
-        return await wait_for_cache_ready(timeout_seconds)
+        start_time = time.time()
+        while time.time() - start_time < timeout_seconds:
+            if prompts_list_cache.get("all") is not None:
+                return True
+            await asyncio.sleep(0.5)
+        return False
 
     def create_prompt(self, prompt_request: PushPromptRequest) -> bool:
         """
@@ -487,7 +480,7 @@ class PromptsServiceClient:
             bool: True if successful, False otherwise
         """
         if not self._is_configured():
-            logging.error("PromptsServiceClient not properly configured")
+            logging.debug("PromptsServiceClient not properly configured")
             return False
 
         try:
@@ -538,7 +531,7 @@ class PromptsServiceClient:
             bool: True if successful, False otherwise
         """
         if not self._is_configured():
-            logging.error("PromptsServiceClient not properly configured")
+            logging.debug("PromptsServiceClient not properly configured")
             return False
 
         try:
@@ -554,23 +547,27 @@ class PromptsServiceClient:
 
             headers = {"Authorization": f"Bearer {creds.token}"}
 
+            if not self.prompts_service_url:
+                logging.error("prompts_service_url is None")
+                return False
+
             response = requests.delete(f"{self.prompts_service_url}/{name}", headers=headers)
             response.raise_for_status()
 
-            # Invalidate cache for this prompt
-            invalidate_prompt_cache(name)
+            # Invalidate cache after successful deletion
+            invalidate_prompt_cache()
             logging.info(f"Deleted prompt '{name}' from service and invalidated cache")
             return True
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
                 logging.warning(f"Prompt '{name}' not found in service for deletion")
-            else:
-                logging.error(f"HTTP error deleting prompt '{name}': {e}")
+                return False
+            logging.error(f"HTTP error deleting prompt '{name}': {e}")
             return False
         except Exception as e:
             logging.error(f"Error deleting prompt '{name}': {e}")
             return False
 
 
-# Global instance
+# Singleton instance
 prompts_client = PromptsServiceClient()
