@@ -69,9 +69,16 @@ def fetch_prompt_detail(prompts_service_url: str, name: str, service_key_path: s
         return {"name": name, "status": "error", "error": str(e)}
 
 
+def service_account_key_path() -> str:
+    """Where the prompts service key lives. The default is inside the package, which only suits a clone."""
+    return os.environ.get("PROMPTS_SERVICE_ACCOUNT_KEY_PATH") or str(
+        Path(__file__).resolve().parent / "service-account.json"
+    )
+
+
 def retrieve_prompts():
     try:
-        service_key_path = str(Path(__file__).resolve().parent / "service-account.json")
+        service_key_path = service_account_key_path()
         if not os.path.exists(service_key_path):
             logging.warning(f"Service account file not found at {service_key_path}. Skipping prompt retrieval.")
             return {}

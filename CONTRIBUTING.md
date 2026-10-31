@@ -30,6 +30,10 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
    git remote add upstream https://github.com/hivegate-ai/hivegate.git
    ```
 
+### Picking up an issue
+
+Comment on the issue and it's yours. If there's no PR or update after 7 days, it goes back to being open to anyone, with no hard feelings, and you're welcome to pick it up again later. Maintainers aim to give a first review within 2 days.
+
 ## Development Setup
 
 ### Prerequisites
