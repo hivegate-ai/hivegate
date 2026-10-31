@@ -11,7 +11,7 @@ anthropic==1.13.0
 anyio==4.15.1
 asgiref==3.12.1
 attrs==26.1.0
-authlib==1.8.0
+authlib==1.9.1
 beartype==0.23.0
 beautifulsoup4==4.15.0
 cachetools==7.2.1
