@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS skills (
     description TEXT,
     instructions TEXT NOT NULL,
     category VARCHAR,
-    references TEXT,
+    "references" TEXT,
     scripts TEXT,
     allowed_tools TEXT,
     tags VARCHAR,

@@ -63,6 +63,8 @@ dependencies = [
   "pydantic-settings>=2.14.2",
   "python-multipart>=0.0.31",
   "python-dotenv>=1.0.0",
+  "requests>=2.31.0",
+  "tenacity>=8.0.0",
 ]
 
 [project.scripts]
@@ -80,6 +82,9 @@ Changelog = "https://github.com/hivegate-ai/hivegate/blob/main/CHANGELOG.md"
 dev = ["mypy", "ruff", "types-requests", "types-cachetools"]
 test = ["pytest", "pytest-asyncio", "pytest-cov", "httpx", "coverage", "testcontainers", "requests"]
 langsmith = ["langsmith>=0.14.3", "langchain-core>=1.6.6"]
+# Container workers for the supervisor
+docker = ["docker>=7.0.0"]
+kubernetes = ["kubernetes>=28.0.0"]
 
 [build-system]
 requires = ["setuptools>=84.0.0", "setuptools-scm>=10.3.4"]
@@ -105,6 +110,7 @@ include = [
 
 [tool.setuptools.package-data]
 hivegate_cli = ["templates/**/*"]
+db = ["migrations/*.sql"]
 
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"

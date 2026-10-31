@@ -7,7 +7,7 @@ from typing import List, Optional
 
 import requests
 
-from agents.agent_utils import call_cloud_run_service
+from agents.agent_utils import call_cloud_run_service, service_account_key_path
 from api.services.models import PullPromptResponse, PushPromptRequest
 from cache.prompts_cache import (
     CACHE_TTL,
@@ -63,7 +63,7 @@ class PromptsServiceClient:
     """Client for interacting with the prompts microservice"""
 
     def __init__(self):
-        self.service_key_path = str(Path(__file__).resolve().parent.parent.parent / "agents" / "service-account.json")
+        self.service_key_path = service_account_key_path()
         self.prompts_service_url = os.environ.get("SERVICE_PROMPTS")
 
         if not os.path.exists(self.service_key_path):

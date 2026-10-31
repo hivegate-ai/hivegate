@@ -5,8 +5,13 @@ on:
     types: [published]
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
   publish:
     name: Build and publish
+    needs: ci
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -25,7 +30,7 @@ jobs:
         run: uv build --python 3.12
 
       - name: Check the wheel installs and runs
-        run: uvx --python 3.12 --from "$(ls dist/*.whl)" hivegate --version
+        run: ./scripts/check_wheel.sh
 
       - name: Publish
         run: uv publish --trusted-publishing always

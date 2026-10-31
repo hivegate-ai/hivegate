@@ -34,7 +34,9 @@ hivegate serve             # http://127.0.0.1:8000/docs
 
 Install it as a tool rather than into a project's environment: the package's top-level modules have generic names (`api`, `agents`, `db`) that can clash with other libraries.
 
-To work on HiveGate itself, see the [Quickstart](#quickstart), which runs from a clone.
+To upgrade, run `uv tool upgrade hivegate`, then `hivegate migrate`. To work on HiveGate itself, see the [Quickstart](#quickstart), which runs from a clone.
+
+For container workers, install the extra you need: `uv tool install "hivegate[docker]"` or `"hivegate[kubernetes]"`.
 
 Or deploy the prebuilt image in one click:
 
