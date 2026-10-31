@@ -332,6 +332,8 @@ Platform-specific deployment manifests and guides live under `deploy/`:
 | `XAI_API_KEY` | * | xAI API key (Grok models) |
 | `ZAI_API_KEY` | * | Z.ai API key (GLM models) |
 | `DEEPSEEK_API_KEY` | * | DeepSeek API key |
+| `DOCS_ENABLED` | No | Default: `true`. Controls the OpenAPI documentation endpoints at `/docs` and `/redoc`; set to `false` to disable them. |
+| `CORS_ORIGIN_LIST` | No | Default: `[]`. Additional allowed CORS origins. `http://localhost` and `http://localhost:3000` are always added to the configured origins, with duplicates removed. |
 | `QDRANT_URL` | No | Qdrant vector database URL |
 | `SECRET_TOKEN_ENC_KEY` | For OAuth tokens | Fernet key that encrypts stored OAuth tokens. Storing a token fails without it. Generate one with `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` |
 | `PRICING_OVERRIDES` | No | JSON of per-model prices for [usage metering](#usage-and-cost) |
