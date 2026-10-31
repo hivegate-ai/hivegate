@@ -1,5 +1,5 @@
 [project]
-name = "hivegate"
+name = "hivegate-ai"
 dynamic = ["version"]
 description = "Run your Agno agents as a production API: per-user sessions and OAuth tokens, human approval, teams, versioned prompts."
 requires-python = ">=3.11"

@@ -1771,7 +1771,7 @@ wheels = [
 ]
 
 [[package]]
-name = "hivegate"
+name = "hivegate-ai"
 source = { editable = "." }
 dependencies = [
     { name = "agno", extra = ["mcp"] },

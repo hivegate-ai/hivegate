@@ -144,7 +144,7 @@ def _cmd_migrate(args: argparse.Namespace) -> int:
 
 def _version() -> str:
     try:
-        return metadata.version("hivegate")
+        return metadata.version("hivegate-ai")
     except metadata.PackageNotFoundError:
         return "unknown"
 

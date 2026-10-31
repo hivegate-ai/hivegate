@@ -25,7 +25,7 @@ HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/
 **[Website](https://hivegate.dev/?utm_source=github-readme)** · **[Docs](https://hivegate.dev/docs/?utm_source=github-readme)** · **[Deploy guide](https://hivegate.dev/deploy/?utm_source=github-readme)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)** · **[Roadmap](https://github.com/hivegate-ai/hivegate/issues/72)**
 
 ```sh
-uv tool install hivegate   # or: pipx install hivegate
+uv tool install hivegate-ai   # or: pipx install hivegate-ai
 mkdir my-agents && cd my-agents
 hivegate init              # writes compose.yaml and a local .env; then set GOOGLE_API_KEY in .env
 docker compose up -d       # Postgres + Qdrant, seeds demo agents
@@ -34,9 +34,9 @@ hivegate serve             # http://127.0.0.1:8000/docs
 
 Install it as a tool rather than into a project's environment: the package's top-level modules have generic names (`api`, `agents`, `db`) that can clash with other libraries.
 
-To upgrade, run `uv tool upgrade hivegate`, then `hivegate migrate`. To work on HiveGate itself, see the [Quickstart](#quickstart), which runs from a clone.
+To upgrade, run `uv tool upgrade hivegate-ai`, then `hivegate migrate`. To work on HiveGate itself, see the [Quickstart](#quickstart), which runs from a clone.
 
-For container workers, install the extra you need: `uv tool install "hivegate[docker]"` or `"hivegate[kubernetes]"`.
+For container workers, install the extra you need: `uv tool install "hivegate-ai[docker]"` or `"hivegate-ai[kubernetes]"`.
 
 Or deploy the prebuilt image in one click:
 
