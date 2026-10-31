@@ -41,6 +41,29 @@ def test_streamable_http_type_accepted():
     assert len(build_mcp_toolkits(cfg)) == 1
 
 
-def test_non_http_or_missing_url_ignored():
-    cfg = _cfg([_S(type="stdio", url=None), _S(type="http", url=None), _S(type="sse", url="https://x")])
+def test_unsupported_transports_are_ignored_with_warnings(caplog):
+    cfg = _cfg(
+        [
+            _S(name="git", type="stdio", url=None),
+            _S(name="legacy", type="sse", url="https://x"),
+            _S(name="default", url=None),
+        ]
+    )
+
     assert build_mcp_toolkits(cfg) == []
+
+    assert "git" in caplog.text
+    assert "stdio" in caplog.text
+    assert "legacy" in caplog.text
+    assert "sse" in caplog.text
+    assert "default" in caplog.text
+
+
+def test_http_server_without_url_is_ignored_with_warning(caplog):
+    cfg = _cfg([_S(name="missing-url", type="http", url=None)])
+
+    assert build_mcp_toolkits(cfg) == []
+
+    assert "missing-url" in caplog.text
+    assert "http" in caplog.text
+    assert "missing URL" in caplog.text
