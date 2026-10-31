@@ -1,9 +1,22 @@
 [project]
 name = "hivegate"
 dynamic = ["version"]
+description = "Run your Agno agents as a production API: per-user sessions and OAuth tokens, human approval, teams, versioned prompts."
 requires-python = ">=3.11"
 readme = "README.md"
-authors = [{ name = "Agno", email = "hello@agno.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "HiveGate contributors" }]
+keywords = ["agno", "ai-agents", "agent-runtime", "fastapi", "mcp", "multi-agent", "human-in-the-loop", "oauth", "self-hosted"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 
 dependencies = [
   "agno[mcp]>=3.1.2",
@@ -49,7 +62,18 @@ dependencies = [
   "msgpack>=1.2.3",
   "pydantic-settings>=2.14.2",
   "python-multipart>=0.0.31",
+  "python-dotenv>=1.0.0",
 ]
+
+[project.scripts]
+hivegate = "hivegate_cli.main:main"
+
+[project.urls]
+Homepage = "https://hivegate.dev/?utm_source=pypi"
+Documentation = "https://hivegate.dev/docs/?utm_source=pypi"
+Repository = "https://github.com/hivegate-ai/hivegate"
+Issues = "https://github.com/hivegate-ai/hivegate/issues"
+Changelog = "https://github.com/hivegate-ai/hivegate/blob/main/CHANGELOG.md"
 
 
 [project.optional-dependencies]
@@ -63,6 +87,24 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
+# Named, not discovered: the repo's top-level modal/ would shadow the real modal library,
+# and tests/, evals/ and tools_apps/ are not part of the server.
+include = [
+  "agents*",
+  "api*",
+  "cache*",
+  "db*",
+  "dynamic_kb*",
+  "hivegate_cli*",
+  "prompts*",
+  "remote_agent*",
+  "supervisor*",
+  "toolkits*",
+  "workspace_suite*",
+]
+
+[tool.setuptools.package-data]
+hivegate_cli = ["templates/**/*"]
 
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"
