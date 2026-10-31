@@ -387,6 +387,10 @@ HiveGate is built in the open, and these people have contributed to it:
   documentation (#101)
 - [@shashank1027](https://github.com/shashank1027) — added a test that keeps `.env.example`
   in sync with `ApiSettings` (#103)
+- [@ompatil1906](https://github.com/ompatil1906) — made the agent debug setting honour
+  `AGENT_DEBUG_MODE` (#114)
+- [@coughlmao](https://github.com/coughlmao) — made `build_mcp_toolkits` warn when it drops
+  an MCP server, naming the server and its transport (#146)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
