@@ -137,7 +137,7 @@ soupsieve==3.0.4
 sqlalchemy==2.1.6
 sse-starlette==3.6.0
 starlette==1.10.0
-tenacity==9.1.4
+tenacity==9.2.1
 truststore==0.10.5
 typer==0.27.3
 types-cachetools==7.0.0.20260713
