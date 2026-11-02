@@ -27,6 +27,10 @@ updates:
       # cannot resolve. Remove once qdrant-client allows portalocker 4.
       - dependency-name: "portalocker"
         update-types: ["version-update:semver-major"]
+      # google-genai 2.34 caps tenacity<9.2.0, so tenacity 9.2 cannot
+      # resolve. Remove once google-genai allows tenacity 9.2.
+      - dependency-name: "tenacity"
+        versions: [">=9.2.0"]
     commit-message:
       prefix: "deps"
     labels:

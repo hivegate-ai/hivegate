@@ -32,6 +32,7 @@ from toolkits.drive import DriveToolkit
 from toolkits.email import EmailToolkit
 from toolkits.token_cache import TokenCache
 
+logger = logging.getLogger(__name__)
 # Create module-level token cache instance
 token_cache = TokenCache()
 
@@ -191,9 +192,29 @@ def build_mcp_toolkits(config: Optional[AgentConfig]) -> list:
     """
     worker_config = getattr(config, "worker_config", None)
     servers = list(getattr(worker_config, "mcp_servers", None) or []) if worker_config else []
-    http_servers = [
-        s for s in servers if getattr(s, "url", None) and getattr(s, "type", "") in ("http", "streamable-http")
-    ]
+    http_servers = []
+    for server in servers:
+        transport = getattr(server, "type", "stdio")
+        server_name = getattr(server, "name", "unknown")
+
+        if transport not in ("http", "streamable-http"):
+            logger.warning(
+                "Skipping MCP server '%s': unsupported transport '%s'",
+                server_name,
+                transport,
+            )
+            continue
+
+        if not getattr(server, "url", None):
+            logger.warning(
+                "Skipping MCP server '%s': missing URL for transport '%s'",
+                server_name,
+                transport,
+            )
+            continue
+
+        http_servers.append(server)
+
     if not http_servers:
         return []
 
