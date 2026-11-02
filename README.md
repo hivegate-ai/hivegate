@@ -25,13 +25,18 @@ HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/
 **[Website](https://hivegate.dev/?utm_source=github-readme)** · **[Docs](https://hivegate.dev/docs/?utm_source=github-readme)** · **[Deploy guide](https://hivegate.dev/deploy/?utm_source=github-readme)** · **[Discussions](https://github.com/hivegate-ai/hivegate/discussions)** · **[Roadmap](https://github.com/hivegate-ai/hivegate/issues/72)**
 
 ```sh
-git clone https://github.com/hivegate-ai/hivegate && cd hivegate
-cp .env.example .env    # then set GOOGLE_API_KEY and uncomment AUTH_DISABLED=true
-docker compose up -d    # Postgres + Qdrant, seeds demo agents
-./scripts/dev_setup.sh && source .venv/bin/activate && ./scripts/start_server.sh
+uv tool install hivegate-ai   # or: pipx install hivegate-ai
+mkdir my-agents && cd my-agents
+hivegate init              # writes compose.yaml and a local .env; then set GOOGLE_API_KEY in .env
+docker compose up -d       # Postgres + Qdrant, seeds demo agents
+hivegate serve             # http://127.0.0.1:8000/docs
 ```
 
-See the [Quickstart](#quickstart) for the full steps.
+Install it as a tool rather than into a project's environment: the package's top-level modules have generic names (`api`, `agents`, `db`) that can clash with other libraries.
+
+To upgrade, run `uv tool upgrade hivegate-ai`, then `hivegate migrate`. To work on HiveGate itself, see the [Quickstart](#quickstart), which runs from a clone.
+
+For container workers, install the extra you need: `uv tool install "hivegate-ai[docker]"` or `"hivegate-ai[kubernetes]"`.
 
 Or deploy the prebuilt image in one click:
 
@@ -387,6 +392,10 @@ HiveGate is built in the open, and these people have contributed to it:
   documentation (#101)
 - [@shashank1027](https://github.com/shashank1027) — added a test that keeps `.env.example`
   in sync with `ApiSettings` (#103)
+- [@ompatil1906](https://github.com/ompatil1906) — made the agent debug setting honour
+  `AGENT_DEBUG_MODE` (#114)
+- [@coughlmao](https://github.com/coughlmao) — made `build_mcp_toolkits` warn when it drops
+  an MCP server, naming the server and its transport (#146)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
