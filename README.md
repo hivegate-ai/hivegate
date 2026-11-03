@@ -397,7 +397,8 @@ HiveGate is built in the open, and these people have contributed to it:
 - [@ompatil1906](https://github.com/ompatil1906) — made the agent debug setting honour
   `AGENT_DEBUG_MODE` (#114)
 - [@coughlmao](https://github.com/coughlmao) — made `build_mcp_toolkits` warn when it drops
-  an MCP server, naming the server and its transport (#146)
+  an MCP server, naming the server and its transport (#146), and mapped the OAuth discovery
+  metadata of Atlassian's hosted MCP server (#141)
 - [@yusufthecoder474](https://github.com/yusufthecoder474) — documented `DOCS_ENABLED` and
   `CORS_ORIGIN_LIST` in the README environment table (#145)
 - [@Arun100203](https://github.com/Arun100203) — fixed `docker compose up --wait` by removing
