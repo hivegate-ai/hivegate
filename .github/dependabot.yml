@@ -56,6 +56,12 @@ updates:
     schedule:
       interval: "monthly"
     open-pull-requests-limit: 3
+    ignore:
+      # numpy 2.4.6 ships no Python 3.15 wheel, so the image build falls
+      # back to compiling it from source and fails (#150). Remove once the
+      # pinned numpy publishes cp315 wheels.
+      - dependency-name: "python"
+        versions: [">=3.15"]
     commit-message:
       prefix: "build"
     labels:
