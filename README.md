@@ -402,7 +402,8 @@ HiveGate is built in the open, and these people have contributed to it:
 - [@yusufthecoder474](https://github.com/yusufthecoder474) — documented `DOCS_ENABLED` and
   `CORS_ORIGIN_LIST` in the README environment table (#145)
 - [@Arun100203](https://github.com/Arun100203) — fixed `docker compose up --wait` by removing
-  the Qdrant healthcheck that always failed (#154)
+  the Qdrant healthcheck that always failed (#154), and mapped the OAuth discovery metadata
+  of GitHub's hosted MCP server (#139)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
