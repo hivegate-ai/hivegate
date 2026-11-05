@@ -708,11 +708,19 @@ class TestV2AgentsAPI(unittest.TestCase):
         self.assertEqual(len(data["agent_cache_keys"]), 2)
         self.assertEqual(len(data["run_cache_keys"]), 1)
 
-    @patch("db.agent_info_crud.get_agent_info")
-    def test_clear_session_success(self, mock_get_agent_info):
+    @patch("api.routes.v2.agents.get_agent_db")
+    @patch("api.routes.v2.agents._get_agent_prompt")
+    @patch("api.routes.v2.agents.get_agent_info")
+    def test_clear_session_success(self, mock_get_agent_info, mock_get_prompt, mock_get_agent_db):
         """Test clearing agent session successfully."""
         mock_agent = AgentInfoDB(**self.sample_agent_data)
         mock_get_agent_info.return_value = mock_agent
+
+        mock_prompt = MagicMock()
+        mock_prompt.name = "Test Agent V2"
+        mock_get_prompt.return_value = mock_prompt
+        mock_get_agent_db.return_value.get_session.return_value = {"agent_id": "Test Agent V2"}
+        mock_get_agent_db.return_value.delete_session.return_value = True
 
         clear_request = {"message": "", "user_id": "user123", "session_id": "session456"}
 
@@ -722,6 +730,10 @@ class TestV2AgentsAPI(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["status"], "success")
         self.assertIn("test-agent-v2", data["message"])
+        mock_get_agent_db.assert_called_once_with("a_test_agent_v2_agent")
+        mock_get_agent_db.return_value.delete_session.assert_called_once_with(
+            session_id="session456", user_id="user123"
+        )
 
     @patch("api.routes.v2.agents.get_agent_info")
     def test_clear_session_agent_not_found(self, mock_get_agent_info):
