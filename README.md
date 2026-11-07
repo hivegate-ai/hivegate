@@ -1,4 +1,4 @@
-# HiveGate
+# HiveGate: AI agent runtime
 
 **Run your Agno agents as a production API.**
 

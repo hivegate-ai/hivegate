@@ -1,7 +1,7 @@
 [project]
 name = "hivegate-ai"
 dynamic = ["version"]
-description = "Run your Agno agents as a production API: per-user sessions and OAuth tokens, human approval, teams, versioned prompts."
+description = "HiveGate AI agent runtime: run your Agno agents as a production API, with per-user sessions and OAuth tokens, human approval, teams, versioned prompts."
 requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"
