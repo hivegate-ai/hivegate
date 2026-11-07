@@ -8,9 +8,10 @@ import uuid
 import zlib
 from contextlib import AsyncExitStack
 from threading import Lock
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, cast
 
 from agno.agent import Agent
+from agno.db.base import SessionType
 from agno.media import Image
 
 # agno.models.metrics.Metrics was only a backward-compat alias of RunMetrics, and
@@ -24,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
 from agents.hitl import requirements_for
-from agents.agent import build_mcp_toolkits, ensure_mcp_ready
+from agents.agent import build_mcp_toolkits, ensure_mcp_ready, get_agent_db
 from agents.agent import get_agent as get_agent_impl
 from agents.agent import slug_to_table_name
 from agents.model_factory import ProviderNotConfiguredError
@@ -172,7 +173,14 @@ def _log_safe(value: object) -> str:
     return str(value).replace("\r", "").replace("\n", "")
 
 
-def compute_cache_key(prompt_template: str, agent_id: str, model: Model, user_id: str, session_id: str) -> str:
+def compute_cache_key(
+    prompt_template: str,
+    agent_id: str,
+    model: Model,
+    user_id: str,
+    session_id: str,
+    prompt_name: Optional[str] = None,
+) -> str:
     """
     Compute CRC32-based cache key for agent caching.
 
@@ -182,11 +190,13 @@ def compute_cache_key(prompt_template: str, agent_id: str, model: Model, user_id
         model: Model identifier
         user_id: User identifier
         session_id: Session identifier
+        prompt_name: Prompt identity, which also determines the session table
 
     Returns:
         Cache key string: "crc32_hash:agent_id:model_id"
     """
-    crc32_hash = zlib.crc32(prompt_template.encode("utf-8")) & 0xFFFFFFFF
+    prompt_identity = json.dumps([prompt_name, prompt_template]) if prompt_name is not None else prompt_template
+    crc32_hash = zlib.crc32(prompt_identity.encode("utf-8")) & 0xFFFFFFFF
     # The resolved id, not the alias: when "anthropic:sonnet-latest" moves to a newer
     # model, a cached agent built on the old one must not keep being served.
     return f"{crc32_hash}:{agent_id}:{resolve_model_id(model)}:{user_id}:{session_id}"
@@ -844,6 +854,24 @@ async def _mcp_chat_streamer(
             yield event
 
 
+def _get_agent_prompt(db: Session, agent_id: str, prompt_service_id: str) -> PullPromptResponse:
+    """Resolve the configured prompt for both chat and session deletion."""
+    prompt_data: Optional[PullPromptResponse] = None
+    if os.environ.get("PROMPT_STORAGE_BACKEND", "postgres").lower() == "postgres":
+        prompt_data = _get_prompt_from_local_storage(db, prompt_service_id)
+    else:
+        prompt_data = prompts_client.get_prompt(prompt_service_id)
+        if not prompt_data:
+            prompt_data = _get_prompt_from_local_storage(db, prompt_service_id)
+    if not prompt_data:
+        logging.error(f"Failed to fetch prompt for agent {_log_safe(agent_id)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch prompt template for agent {agent_id}",
+        )
+    return prompt_data
+
+
 async def get_agent(
     db: Session, agent_id: str, model: Model, user_id: str, session_id: str
 ) -> tuple[Optional[Agent], PullPromptResponse, str, AgentConfig]:
@@ -852,26 +880,11 @@ async def get_agent(
     if not db_agent:
         logging.error(f"Agent {_log_safe(agent_id)} not found in database")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found")
-    # Fetch prompt template, respecting PROMPT_STORAGE_BACKEND (mirrors
-    # agents.v2_selector.get_v2_agent): use local postgres storage when that's
-    # the backend, with a prompts-service fallback otherwise. Previously this
-    # always hit the prompts service client, which 500s whenever the prompts
-    # microservice isn't configured -- even with the documented postgres backend.
-    prompt_data: Optional[PullPromptResponse] = None
-    if os.environ.get("PROMPT_STORAGE_BACKEND", "postgres").lower() == "postgres":
-        prompt_data = _get_prompt_from_local_storage(db, str(db_agent.prompt_service_id))
-    else:
-        prompt_data = prompts_client.get_prompt(db_agent.prompt_service_id)  # type: ignore[arg-type]
-        if not prompt_data:
-            prompt_data = _get_prompt_from_local_storage(db, str(db_agent.prompt_service_id))
-    if not prompt_data:
-        logging.error(f"Failed to fetch prompt for agent {_log_safe(agent_id)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch prompt template for agent {agent_id}",
-        )
+    prompt_data = _get_agent_prompt(db, agent_id, str(db_agent.prompt_service_id))
     # Compute CRC32 cache key
-    cache_key = compute_cache_key(prompt_data.template, agent_id, model, user_id, session_id)
+    cache_key = compute_cache_key(
+        prompt_data.template, agent_id, model, user_id, session_id, prompt_name=prompt_data.name
+    )
     logging.debug(f"Computed cache key for agent {_log_safe(agent_id)}: {_log_safe(cache_key)}")
     # Get agent config from database
     agent_config = get_agent_config(db_agent)
@@ -1855,7 +1868,16 @@ async def get_cache_info_v2(agent_id: str):
 @v2_agents_router.post("/{agent_id}/session/clear", response_model=ClearSessionResponse, status_code=status.HTTP_200_OK)
 async def clear_session_v2(agent_id: str, body: ClearSessionRequest, db: Session = Depends(get_db)):
     """
-    Clear agent session history from database.
+    Delete persisted conversation history from the same storage used by chat.
+
+    A session_id selects one session; user_id alone selects that user's sessions
+    for this agent. With both, the session must belong to that user. Missing or
+    blank selectors return 400; no matching deletion returns 404. Separate user
+    memories, account tokens and knowledge are not cleared.
+
+    Each session deletion commits independently. On a storage error, stop and
+    return 500 with the number already deleted; a retry targets the remaining
+    sessions. Sessions created concurrently after selection are not included.
 
     Args:
         agent_id: The ID of the agent
@@ -1865,31 +1887,77 @@ async def clear_session_v2(agent_id: str, body: ClearSessionRequest, db: Session
     Returns:
         ClearSessionResponse with status and message
     """
+    deleted_count = 0
     try:
-        logging.info(f"Session clear request for agent: {agent_id}, user: {body.user_id}, session: {body.session_id}")
+        if body.user_id is None and body.session_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide user_id or session_id")
+        if any(value is not None and not value.strip() for value in (body.user_id, body.session_id)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="user_id and session_id must not be blank"
+            )
+
+        logging.info(
+            "Session clear request for agent: %s, user: %s, session: %s",
+            _log_safe(agent_id),
+            _log_safe(body.user_id),
+            _log_safe(body.session_id),
+        )
 
         # Validate agent exists
         db_agent = get_agent_info(db, agent_id)
         if not db_agent:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found")
 
-        # Get the session table name
-        session_table_name = slug_to_table_name(f"a_{agent_id}_agent")
+        prompt = _get_agent_prompt(db, agent_id, str(db_agent.prompt_service_id))
+        session_table_name = slug_to_table_name(f"a_{prompt.name}_agent")
+        storage = get_agent_db(session_table_name)
+        if body.session_id is not None:
+            session_ids = [body.session_id]
+        else:
+            sessions, _ = cast(
+                tuple[List[Dict[str, Any]], int],
+                storage.get_sessions(
+                    session_type=SessionType.AGENT,
+                    component_id=prompt.name,
+                    user_id=body.user_id,
+                    deserialize=False,
+                    include_runs=False,
+                ),
+            )
+            session_ids = [session["session_id"] for session in sessions]
 
-        # TODO: Implement actual session clearing from database
-        # This would involve:
-        # 1. Get PostgresDb instance
-        # 2. Delete session records based on user_id and/or session_id
-        # 3. Confirm deletion
+        for session_id in session_ids:
+            session = cast(
+                Optional[Dict[str, Any]],
+                storage.get_session(session_id=session_id, user_id=body.user_id, deserialize=False, runs_limit=0),
+            )
+            # Different prompt names can normalize to the same table. Never
+            # clear a row belonging to another prompt in that shared table.
+            if session is None or session.get("agent_id") != prompt.name:
+                continue
+            # Keep the owner predicate on the delete itself, including after a
+            # user-only lookup: ownership may change between reading and deleting.
+            if storage.delete_session(session_id=session_id, user_id=body.user_id):
+                deleted_count += 1
 
-        logging.info(f"Session cleared for agent {agent_id}, table: {session_table_name}")
+        if not deleted_count:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"No matching sessions for agent {agent_id}"
+            )
 
-        return ClearSessionResponse(status="success", message=f"Session cleared for agent {agent_id}")
+        logging.info("Deleted %s session(s) for agent %s", deleted_count, _log_safe(agent_id))
+        return ClearSessionResponse(
+            status="success", message=f"Cleared {deleted_count} session(s) for agent {agent_id}"
+        )
 
     except HTTPException:
         raise
-    except Exception as e:
-        logging.exception(f"Error clearing session for agent {agent_id}: {str(e)}")
+    except Exception:
+        logging.exception(
+            "Error clearing sessions for agent %s after %s deletion(s)", _log_safe(agent_id), deleted_count
+        )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clear session: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to clear sessions for agent {agent_id}; {deleted_count} session(s) already deleted. "
+            "Retry to clear remaining sessions.",
         )
