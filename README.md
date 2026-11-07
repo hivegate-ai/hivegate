@@ -404,6 +404,8 @@ HiveGate is built in the open, and these people have contributed to it:
 - [@Arun100203](https://github.com/Arun100203) — fixed `docker compose up --wait` by removing
   the Qdrant healthcheck that always failed (#154), and mapped the OAuth discovery metadata
   of GitHub's hosted MCP server (#139)
+- [@rajshadow](https://github.com/rajshadow) — made `POST /v2/agents/{id}/session/clear` actually
+  delete the session and its runs, instead of reporting success and keeping them (#161)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
