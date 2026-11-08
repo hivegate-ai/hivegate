@@ -6,18 +6,19 @@ import os
 import time
 import uuid
 import zlib
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, aclosing
 from threading import Lock
 from typing import Any, AsyncGenerator, Dict, List, Optional, cast
 
 from agno.agent import Agent
 from agno.db.base import SessionType
+from agno.exceptions import ModelAuthenticationError, ModelProviderError
 from agno.media import Image
 
 # agno.models.metrics.Metrics was only a backward-compat alias of RunMetrics, and
 # agno 3 removed it. RunMetrics lives in agno.metrics from 2.6 through 3.x.
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from google import genai
 from google.genai.types import File
 from pydantic import BaseModel, Field
@@ -32,6 +33,7 @@ from agents.model_factory import ProviderNotConfiguredError
 from agents.model_resolver import resolve_model_id
 from agents.provider_models import humanize_billing_error
 from agents.v2_selector import _get_prompt_from_local_storage
+from api.provider_errors import error_payload, failed_run_response, run_error_event
 from api.services import usage as usage_service
 from api.services.access_token import fetch_access_token, has_access_tokens_batch  # noqa: F401
 from api.services.auth import get_api_key
@@ -758,13 +760,6 @@ async def chat_response_streamer_v2(
         "session_state": session_state,
     }
 
-    run_response = agent.arun(
-        body.message,
-        images=image_objects if image_objects else None,
-        files=file_objects if file_objects else None,
-        stream=True,
-        **run_config,
-    )  # type: ignore[call-overload]
     chunk_count = 0
     full_output_text = ""
     collector = usage_service.UsageCollector(usage_ctx or usage_service.context_for(getattr(agent, "id", None), body))
@@ -772,36 +767,52 @@ async def chat_response_streamer_v2(
     collector.input_text = body.message
 
     try:
-        async for chunk in run_response:
-            chunk_count += 1
-            if chunk_count % 10 == 0:  # Log every 10 chunks to avoid excessive logging
-                logging.debug(f"V2 streaming chunk #{chunk_count}")
+        run_response = agent.arun(
+            body.message,
+            images=image_objects if image_objects else None,
+            files=file_objects if file_objects else None,
+            stream=True,
+            **run_config,
+        )  # type: ignore[call-overload]
+        async with aclosing(run_response):
+            async for chunk in run_response:
+                chunk_count += 1
+                if chunk_count % 10 == 0:  # Log every 10 chunks to avoid excessive logging
+                    logging.debug(f"V2 streaming chunk #{chunk_count}")
 
-            # Convert chunk to dict
-            event_data = _event_to_dict(chunk)
-            collector.observe(event_data)
-            humanize_billing_error(event_data)
+                # Convert chunk to dict
+                event_data = _event_to_dict(chunk)
+                collector.observe(event_data)
+                failure = run_error_event(event_data, body.model)
+                if failure is not None:
+                    if not event_data.get("parent_run_id"):
+                        yield _format_sse_event("error", failure)
+                        return
+                    event_data = failure
 
-            # Only text content is part of the answer. Reasoning (and some other)
-            # events can carry a dict `content`; str-concatenating those raised
-            # "can only concatenate str (not dict) to str" and aborted the stream.
-            if isinstance(event_data.get("content"), str):
-                full_output_text += event_data["content"]
+                # Only text content is part of the answer. Reasoning (and some other)
+                # events can carry a dict `content`; str-concatenating those raised
+                # "can only concatenate str (not dict) to str" and aborted the stream.
+                if isinstance(event_data.get("content"), str):
+                    full_output_text += event_data["content"]
 
-            # Cache the run for later commit if run_id is present
-            if "run_id" in event_data and event_data["run_id"]:
-                _run_cache[event_data["run_id"]] = chunk
+                # Cache the run for later commit if run_id is present
+                if "run_id" in event_data and event_data["run_id"]:
+                    _run_cache[event_data["run_id"]] = chunk
 
-            # Process tools using shared helper function
-            _process_tools_in_event(event_data)
+                # Process tools using shared helper function
+                _process_tools_in_event(event_data)
 
-            yield _format_sse_event("message", event_data)
+                yield _format_sse_event("message", event_data)
 
     except (asyncio.CancelledError, GeneratorExit):
         # The client hung up mid-stream. Record the run as cancelled, not completed:
         # its final metrics never arrived (api/services/usage.py, disconnect()).
         collector.disconnect()
         raise
+    except (ModelAuthenticationError, ModelProviderError) as e:
+        collector.fail(f"{type(e).__name__}: {e}")
+        yield _format_sse_event("error", error_payload(body.model, e))
     except Exception as e:
         # Log the error and send error event to client
         logging.error(f"Error during streaming response: {type(e).__name__}: {str(e)}")
@@ -850,8 +861,9 @@ async def _mcp_chat_streamer(
                 {"status": "error", "error": "MCP tool server unavailable"},
             )
             return
-        async for event in chat_response_streamer_v2(agent, body, db, usage_ctx):
-            yield event
+        async with aclosing(chat_response_streamer_v2(agent, body, db, usage_ctx)) as events:
+            async for event in events:
+                yield event
 
 
 def _get_agent_prompt(db: Session, agent_id: str, prompt_service_id: str) -> PullPromptResponse:
@@ -914,6 +926,11 @@ async def chat_with_agent_v2(
 
     Returns:
         Either a streaming response or a complete ChatResponse with optional paused status
+
+        Non-streaming model failures return HTTP 502 with status="error" and
+        a safe detail. Streaming keeps HTTP 200 and ends with an SSE event:error
+        containing status, error and the same detail, without buffering startup
+        events or exposing the provider's raw error as content.
     """
     # Who is calling, for the per-call cost record (api/services/usage.py).
     usage_ctx = usage_service.context_for(agent_id, body, api_key)
@@ -983,12 +1000,19 @@ async def chat_with_agent_v2(
                 collector.input_text = body.message
                 try:
                     response = await mcp_agent.arun(body.message, stream=False, **run_config)
+                except (ModelAuthenticationError, ModelProviderError) as e:
+                    collector.fail(f"{type(e).__name__}: {e}")
+                    await record_usage(collector)
+                    return JSONResponse(error_payload(body.model, e), status_code=502)
                 except Exception as e:
                     collector.fail(f"{type(e).__name__}: {e}")
                     await record_usage(collector)
                     raise
                 collector.observe_response(response)
                 token_usage = await record_usage(collector)
+                failure_response = failed_run_response(response, body.model)
+                if failure_response is not None:
+                    return failure_response
                 if hasattr(response, "run_id") and response.run_id:
                     _run_cache[response.run_id] = response
                 tools_dict = []
@@ -1108,6 +1132,10 @@ async def chat_with_agent_v2(
                     stream=False,
                     **run_config,
                 )  # type: ignore[call-overload]
+            except (ModelAuthenticationError, ModelProviderError) as e:
+                collector.fail(f"{type(e).__name__}: {e}")
+                await record_usage(collector)
+                return JSONResponse(error_payload(body.model, e), status_code=502)
             except Exception as e:
                 collector.fail(f"{type(e).__name__}: {e}")
                 await record_usage(collector)
@@ -1115,6 +1143,9 @@ async def chat_with_agent_v2(
             logging.debug(f"Completed v2 non-streaming request for agent: {_log_safe(agent_id)}")
             collector.observe_response(response)
             token_usage = await record_usage(collector)
+            failure_response = failed_run_response(response, body.model)
+            if failure_response is not None:
+                return failure_response
 
             # Cache the run for later commit
             if hasattr(response, "run_id") and response.run_id:
