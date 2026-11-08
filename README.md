@@ -409,6 +409,8 @@ HiveGate is built in the open, and these people have contributed to it:
   of GitHub's hosted MCP server (#139)
 - [@rajshadow](https://github.com/rajshadow) — made `POST /v2/agents/{id}/session/clear` actually
   delete the session and its runs, instead of reporting success and keeping them (#161)
+- [@arpitkjaiswal](https://github.com/arpitkjaiswal) — documented the Bright Data toolkit's three
+  settings in the README's Environment Variables table (#147)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
