@@ -85,7 +85,10 @@ def test_billing_run_error_is_humanized_for_the_client():
     assert "credit balance is too low" in collector.error  # the detail stays server-side
 
 
-def test_other_run_errors_pass_through():
-    payloads, _ = _run([{"event": "RunError", "run_id": "r1", "content": "MCP tool call timed out"}])
-    assert payloads[-1]["content"] == "MCP tool call timed out"
-    assert "error_code" not in payloads[-1]
+def test_other_run_errors_are_sanitized_and_details_stay_server_side():
+    raw_error = "MCP tool call timed out; secret-provider-token"
+    payloads, collector = _run([{"event": "RunError", "run_id": "r1", "content": raw_error}])
+    assert payloads[-1]["status"] == "error"
+    assert payloads[-1]["content"] == payloads[-1]["detail"]
+    assert "secret-provider-token" not in json.dumps(payloads)
+    assert raw_error in collector.error
