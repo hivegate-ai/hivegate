@@ -2,20 +2,22 @@ import asyncio
 import copy
 import json
 import logging
+from contextlib import aclosing
 from functools import lru_cache
 from threading import Lock
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, cast
 
 from agno.db.postgres import PostgresDb
 from agno.memory import MemoryManager
 from agno.models.google import Gemini
 from agno.run.base import RunStatus
+from agno.exceptions import ModelAuthenticationError, ModelProviderError
 
 # agno.models.metrics.Metrics was only a backward-compat alias of RunMetrics, and
 # agno 3 removed it. RunMetrics lives in agno.metrics from 2.6 through 3.x.
 from agno.team import Team, TeamMode
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -24,6 +26,7 @@ from agents.provider_models import humanize_billing_error
 from agents.hitl import requirements_for
 from agents.model_resolver import resolve_model_id
 from agents.v2_selector import get_agent
+from api.provider_errors import error_payload, failed_run_response, run_error_event
 from api.routes.v2.agents import TenantProfile, UserProfile, _log_safe
 from api.services import usage as usage_service
 from api.services.access_token import fetch_access_token
@@ -582,7 +585,6 @@ async def team_response_streamer(
         SSE-formatted event strings with team response chunks including status, run_id, and tools
     """
     logging.debug(f"Starting team streaming response for message: {_log_safe(message[:50])}...")
-    run_response = team.arun(message, stream=True)  # Returns async generator, don't await
     chunk_count = 0
     full_output_text = ""
     collector = usage_service.UsageCollector(
@@ -592,61 +594,71 @@ async def team_response_streamer(
     collector.input_text = message
 
     try:
-        async for chunk in run_response:
-            # Skip None chunks
-            if chunk is None:
-                logging.debug("Skipping None chunk in team streaming")
-                continue
+        run_response = team.arun(message, stream=True)  # Returns async generator, don't await
+        async with aclosing(cast(AsyncGenerator[Any, None], run_response)):
+            async for chunk in run_response:
+                # Skip None chunks
+                if chunk is None:
+                    logging.debug("Skipping None chunk in team streaming")
+                    continue
 
-            chunk_count += 1
-            if chunk_count % 10 == 0:  # Log every 10 chunks to avoid excessive logging
-                logging.debug(f"Team streaming chunk #{chunk_count}")
+                chunk_count += 1
+                if chunk_count % 10 == 0:  # Log every 10 chunks to avoid excessive logging
+                    logging.debug(f"Team streaming chunk #{chunk_count}")
 
-            # Convert chunk to dict
-            event_data = _event_to_dict(chunk)
+                # Convert chunk to dict
+                event_data = _event_to_dict(chunk)
 
-            # Skip if we couldn't convert to dict properly
-            if not event_data or "error" in event_data:
-                logging.warning(f"Skipping chunk that couldn't be serialized: {event_data}")
-                continue
-            collector.observe(event_data)
-            humanize_billing_error(event_data)
+                # Skip if we couldn't convert to dict properly
+                if not event_data or "error" in event_data:
+                    logging.warning(f"Skipping chunk that couldn't be serialized: {event_data}")
+                    continue
+                collector.observe(event_data)
+                failure = run_error_event(event_data, usage_service.model_of(team)[0])
+                if failure is not None:
+                    if not event_data.get("parent_run_id"):
+                        yield _format_sse_event("error", failure)
+                        return
+                    event_data = failure
 
-            # Accumulate the answer text
-            if isinstance(event_data.get("content"), str):
-                full_output_text += event_data["content"]
+                # Accumulate the answer text
+                if isinstance(event_data.get("content"), str):
+                    full_output_text += event_data["content"]
 
-            # Cache the run for later commit if run_id is present
-            if "run_id" in event_data and event_data["run_id"]:
-                try:
-                    with _team_run_cache_lock:
-                        _team_run_cache[event_data["run_id"]] = chunk
-                        logging.debug(f"Cached team run {event_data['run_id']} for commit")
+                # Cache the run for later commit if run_id is present
+                if "run_id" in event_data and event_data["run_id"]:
+                    try:
+                        with _team_run_cache_lock:
+                            _team_run_cache[event_data["run_id"]] = chunk
+                            logging.debug(f"Cached team run {event_data['run_id']} for commit")
 
-                        # If this is a child agent's RunPaused event (has parent_run_id), also cache by parent_run_id
-                        # This allows the client to commit using the team's run_id when a child agent pauses
-                        if (
-                            event_data.get("event") == "RunPaused"
-                            and "parent_run_id" in event_data
-                            and event_data["parent_run_id"]
-                        ):
-                            _team_run_cache[event_data["parent_run_id"]] = chunk
-                            logging.debug(
-                                f"Child agent paused - also cached by parent run_id {event_data['parent_run_id']}"
-                            )
-                except Exception as cache_error:
-                    logging.error(f"Error caching run: {cache_error}", exc_info=True)
+                            # If this is a child agent's RunPaused event (has parent_run_id), also cache by parent_run_id
+                            # This allows the client to commit using the team's run_id when a child agent pauses
+                            if (
+                                event_data.get("event") == "RunPaused"
+                                and "parent_run_id" in event_data
+                                and event_data["parent_run_id"]
+                            ):
+                                _team_run_cache[event_data["parent_run_id"]] = chunk
+                                logging.debug(
+                                    f"Child agent paused - also cached by parent run_id {event_data['parent_run_id']}"
+                                )
+                    except Exception as cache_error:
+                        logging.error(f"Error caching run: {cache_error}", exc_info=True)
 
-            # Process tools using shared helper function
-            _process_tools_in_event(event_data)
+                # Process tools using shared helper function
+                _process_tools_in_event(event_data)
 
-            yield _format_sse_event("message", event_data)
+                yield _format_sse_event("message", event_data)
 
     except (asyncio.CancelledError, GeneratorExit):
         # The client hung up mid-stream. Record the run as cancelled, not completed:
         # its final metrics never arrived (api/services/usage.py, disconnect()).
         collector.disconnect()
         raise
+    except (ModelAuthenticationError, ModelProviderError) as e:
+        collector.fail(f"{type(e).__name__}: {e}")
+        yield _format_sse_event("error", error_payload(usage_service.model_of(team)[0], e))
     except Exception as e:
         # Log the error and send error event to client
         logging.error(f"Error during team streaming response: {type(e).__name__}: {str(e)}", exc_info=True)
@@ -773,6 +785,11 @@ async def create_team_run_v2(
 
     Returns:
         Either a streaming response or a complete TeamRunResponse
+
+        Non-streaming model failures return HTTP 502 with status="error" and
+        a safe detail. Streaming keeps HTTP 200 and ends with an SSE event:error
+        containing status, error and the same detail, without buffering startup
+        events or exposing the provider's raw error as content.
     """
     logging.info(f"Creating v2 team run for team_id: {_log_safe(team_id)}")
     logging.debug(f"TeamRunRequest: {_log_safe(body)}")
@@ -873,6 +890,10 @@ async def create_team_run_v2(
         collector.input_text = body.message
         try:
             response = await team.arun(body.message, stream=False)
+        except (ModelAuthenticationError, ModelProviderError) as e:
+            collector.fail(f"{type(e).__name__}: {e}")
+            await record_usage(collector)
+            return JSONResponse(error_payload(usage_service.model_of(team)[0], e), status_code=502)
         except Exception as e:
             collector.fail(f"{type(e).__name__}: {e}")
             await record_usage(collector)
@@ -882,6 +903,9 @@ async def create_team_run_v2(
         # Metered like every run (this path used to store nothing); the summary goes back.
         collector.observe_response(response)
         token_usage = await record_usage(collector)
+        failure_response = failed_run_response(response, usage_service.model_of(team)[0])
+        if failure_response is not None:
+            return failure_response
 
         # Extract status and run_id
         response_status = response.status if hasattr(response, "status") else None
