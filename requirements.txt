@@ -40,7 +40,7 @@ google-auth==2.62.0
 google-cloud-core==2.8.0
 google-cloud-storage==3.17.1
 google-crc32c==1.9.0
-google-genai==2.34.0
+google-genai==3.0.0
 google-resumable-media==2.11.0
 googleapis-common-protos==1.76.0
 greenlet==3.5.6
