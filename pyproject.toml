@@ -87,7 +87,7 @@ docker = ["docker>=7.0.0"]
 kubernetes = ["kubernetes>=28.0.0"]
 
 [build-system]
-requires = ["setuptools>=84.0.0", "setuptools-scm>=10.3.4"]
+requires = ["setuptools>=84.2.1", "setuptools-scm>=10.3.4"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
