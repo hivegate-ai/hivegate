@@ -5,6 +5,7 @@ error contracts on connect failure (streaming SSE error event / non-streaming 50
 empty-toolset guard, and that non-MCP agents bypass the MCP path entirely.
 """
 
+import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -48,6 +49,11 @@ def _patches():
 
 class TestMcpChatRoute(unittest.TestCase):
     def setUp(self):
+        import os
+
+        os.environ["SKIP_DB_TABLE_CHECK"] = "true"
+        os.environ["PROMPT_STORAGE_BACKEND"] = "service"
+
         from api.routes.v2.agents import _agent_cache, _cache_lock, _run_cache
 
         with _cache_lock:
@@ -104,10 +110,16 @@ class TestMcpChatRoute(unittest.TestCase):
             "locale": "en-US",
         }
 
-    def _run(self, toolkits, impl_capture=None, stream=False):
+    def _agent_with_mcp_servers(self, servers: list) -> dict:
+        config_json = json.dumps({"worker_config": {"mcp_servers": servers}})
+        data = dict(self.agent_data)
+        data["config"] = config_json
+        return data
+
+    def _run(self, toolkits, impl_capture=None, stream=False, agent_data=None):
         envp, storep, promptsp, infop = _patches()
         with envp, storep, promptsp as mock_prompts, infop as mock_info:
-            mock_info.return_value = AgentInfoDB(**self.agent_data)
+            mock_info.return_value = AgentInfoDB(**(agent_data or self.agent_data))
             mock_prompts.get_prompt.return_value = self._mock_prompt()
 
             def impl(**kwargs):
@@ -151,6 +163,249 @@ class TestMcpChatRoute(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         # The original (non-MCP) path builds the agent without extra_tools.
         self.assertIn(cap["extra_tools"], (None, "ABSENT"))
+
+    def test_stdio_transport_rejection(self):
+        agent_data = self._agent_with_mcp_servers([{"name": "git", "type": "stdio", "command": "npx"}])
+        resp = self._run([], agent_data=agent_data, stream=False)
+        self.assertEqual(resp.status_code, 400)
+        detail = resp.json()["detail"]
+        self.assertIn("git", detail)
+        self.assertIn("stdio", detail)
+        self.assertIn("'http', 'streamable-http'", detail)
+
+    def test_sse_transport_rejection(self):
+        agent_data = self._agent_with_mcp_servers([{"name": "legacy", "type": "sse", "url": "https://example.com/sse"}])
+        resp = self._run([], agent_data=agent_data, stream=False)
+        self.assertEqual(resp.status_code, 400)
+        detail = resp.json()["detail"]
+        self.assertIn("legacy", detail)
+        self.assertIn("sse", detail)
+        self.assertIn("'http', 'streamable-http'", detail)
+
+    def test_unsupported_arbitrary_transport_rejection(self):
+        agent_data = self._agent_with_mcp_servers([{"name": "custom", "type": "grpc", "url": "localhost:50051"}])
+        resp = self._run([], agent_data=agent_data, stream=False)
+        self.assertEqual(resp.status_code, 400)
+        detail = resp.json()["detail"]
+        self.assertIn("custom", detail)
+        self.assertIn("grpc", detail)
+        self.assertIn("'http', 'streamable-http'", detail)
+
+    def test_missing_http_url_rejection(self):
+        agent_data = self._agent_with_mcp_servers([{"name": "missing-url", "type": "http"}])
+        resp = self._run([], agent_data=agent_data, stream=False)
+        self.assertEqual(resp.status_code, 400)
+        detail = resp.json()["detail"]
+        self.assertIn("missing-url", detail)
+        self.assertIn("http", detail)
+        self.assertIn("'http', 'streamable-http'", detail)
+        self.assertIn("http:// or https://", detail)
+
+    def test_empty_http_url_rejection(self):
+        agent_data = self._agent_with_mcp_servers([{"name": "empty-url", "type": "http", "url": "   "}])
+        resp = self._run([], agent_data=agent_data, stream=False)
+        self.assertEqual(resp.status_code, 400)
+        detail = resp.json()["detail"]
+        self.assertIn("empty-url", detail)
+        self.assertIn("http", detail)
+        self.assertIn("'http', 'streamable-http'", detail)
+        self.assertIn("http:// or https://", detail)
+
+    def test_invalid_url_format_rejection(self):
+        agent_data = self._agent_with_mcp_servers([{"name": "bad-format", "type": "http", "url": "not-a-valid-url"}])
+        resp = self._run([], agent_data=agent_data, stream=False)
+        self.assertEqual(resp.status_code, 400)
+        detail = resp.json()["detail"]
+        self.assertIn("bad-format", detail)
+        self.assertIn("not-a-valid-url", detail)
+        self.assertIn("http:// or https://", detail)
+
+    def test_unsupported_url_scheme_rejection(self):
+        agent_data = self._agent_with_mcp_servers(
+            [{"name": "ftp-server", "type": "http", "url": "ftp://example.com/mcp"}]
+        )
+        resp = self._run([], agent_data=agent_data, stream=False)
+        self.assertEqual(resp.status_code, 400)
+        detail = resp.json()["detail"]
+        self.assertIn("ftp-server", detail)
+        self.assertIn("ftp://example.com/mcp", detail)
+        self.assertIn("http:// or https://", detail)
+
+    def test_mixed_http_and_stdio_configuration_rejection(self):
+        agent_data = self._agent_with_mcp_servers(
+            [
+                {"name": "github", "type": "http", "url": "https://api.github.com/mcp"},
+                {"name": "git", "type": "stdio", "command": "npx"},
+            ]
+        )
+        resp = self._run([], agent_data=agent_data, stream=False)
+        self.assertEqual(resp.status_code, 400)
+        detail = resp.json()["detail"]
+        self.assertIn("git", detail)
+        self.assertIn("stdio", detail)
+        self.assertIn("'http', 'streamable-http'", detail)
+
+    def test_streaming_request_rejected_before_sse_starts(self):
+        agent_data = self._agent_with_mcp_servers([{"name": "git", "type": "stdio", "command": "npx"}])
+        resp = self._run([], agent_data=agent_data, stream=True)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.headers.get("content-type"), "application/json")
+        detail = resp.json()["detail"]
+        self.assertIn("git", detail)
+        self.assertIn("stdio", detail)
+        self.assertIn("'http', 'streamable-http'", detail)
+
+    def test_non_mcp_agent_with_empty_servers_continues_working(self):
+        cap = {}
+        agent_data = self._agent_with_mcp_servers([])
+        resp = self._run([], impl_capture=cap, stream=False, agent_data=agent_data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(cap["extra_tools"], (None, "ABSENT"))
+
+    def test_valid_http_url(self):
+        fake = _FakeMCP()
+        cap = {}
+        agent_data = self._agent_with_mcp_servers(
+            [{"name": "local-mcp", "type": "http", "url": "http://localhost:8000/mcp"}]
+        )
+        resp = self._run([fake], impl_capture=cap, stream=False, agent_data=agent_data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(fake.entered)
+        self.assertTrue(fake.exited)
+        self.assertEqual(cap["extra_tools"], [fake])
+
+    def test_valid_https_url(self):
+        fake = _FakeMCP()
+        cap = {}
+        agent_data = self._agent_with_mcp_servers(
+            [{"name": "cloud-mcp", "type": "http", "url": "https://api.example.com/mcp"}]
+        )
+        resp = self._run([fake], impl_capture=cap, stream=False, agent_data=agent_data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(fake.entered)
+        self.assertTrue(fake.exited)
+        self.assertEqual(cap["extra_tools"], [fake])
+
+    def test_valid_http_mcp_configuration_continues_working(self):
+        fake = _FakeMCP()
+        cap = {}
+        agent_data = self._agent_with_mcp_servers([{"name": "pf", "type": "http", "url": "https://example.com/mcp"}])
+        resp = self._run([fake], impl_capture=cap, stream=False, agent_data=agent_data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(fake.entered)
+        self.assertTrue(fake.exited)
+        self.assertEqual(cap["extra_tools"], [fake])
+
+    def test_valid_streamable_http_mcp_configuration_continues_working(self):
+        fake = _FakeMCP()
+        cap = {}
+        agent_data = self._agent_with_mcp_servers(
+            [{"name": "pf", "type": "streamable-http", "url": "https://example.com/mcp"}]
+        )
+        resp = self._run([fake], impl_capture=cap, stream=False, agent_data=agent_data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(fake.entered)
+        self.assertTrue(fake.exited)
+        self.assertEqual(cap["extra_tools"], [fake])
+
+    def test_validate_mcp_servers_for_chat_unit(self):
+        from fastapi import HTTPException
+
+        from api.routes.v2.agents import validate_mcp_servers_for_chat
+        from supervisor.models import MCPServerConfig, WorkerConfig
+
+        # None config
+        validate_mcp_servers_for_chat(None)
+
+        # WorkerConfig None or empty
+        mock_cfg = MagicMock()
+        mock_cfg.worker_config = None
+        validate_mcp_servers_for_chat(mock_cfg)
+
+        mock_cfg.worker_config = MagicMock(mcp_servers=[])
+        validate_mcp_servers_for_chat(mock_cfg)
+
+        # Valid HTTP dict
+        mock_cfg.worker_config = MagicMock(
+            mcp_servers=[{"name": "dict-http", "type": "http", "url": "http://127.0.0.1:8000/mcp"}]
+        )
+        validate_mcp_servers_for_chat(mock_cfg)
+
+        # Valid HTTPS dict
+        mock_cfg.worker_config = MagicMock(
+            mcp_servers=[{"name": "dict-https", "type": "streamable-http", "url": "https://example.com/mcp"}]
+        )
+        validate_mcp_servers_for_chat(mock_cfg)
+
+        # Valid MCPServerConfig objects
+        wc_valid = WorkerConfig(
+            mcp_servers=[
+                MCPServerConfig(name="obj-http", type="http", url="http://localhost:8000"),
+                MCPServerConfig(name="obj-https", type="streamable-http", url="https://api.github.com/mcp"),
+            ]
+        )
+        validate_mcp_servers_for_chat(MagicMock(worker_config=wc_valid))
+
+        # Unsupported transport raises HTTPException 400 (dict)
+        mock_cfg.worker_config = MagicMock(mcp_servers=[{"name": "test-stdio", "type": "stdio"}])
+        with self.assertRaises(HTTPException) as cm:
+            validate_mcp_servers_for_chat(mock_cfg)
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("stdio", cm.exception.detail)
+        self.assertIn("test-stdio", cm.exception.detail)
+        self.assertIn("'http', 'streamable-http'", cm.exception.detail)
+
+        # Unsupported transport raises HTTPException 400 (MCPServerConfig object)
+        wc_stdio = WorkerConfig(mcp_servers=[MCPServerConfig(name="obj-stdio", type="stdio", command="npx")])
+        with self.assertRaises(HTTPException) as cm:
+            validate_mcp_servers_for_chat(MagicMock(worker_config=wc_stdio))
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("stdio", cm.exception.detail)
+        self.assertIn("obj-stdio", cm.exception.detail)
+
+        # Unsupported URL scheme raises HTTPException 400 (dict)
+        mock_cfg.worker_config = MagicMock(
+            mcp_servers=[{"name": "dict-ftp", "type": "http", "url": "ftp://example.com"}]
+        )
+        with self.assertRaises(HTTPException) as cm:
+            validate_mcp_servers_for_chat(mock_cfg)
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("dict-ftp", cm.exception.detail)
+        self.assertIn("ftp://example.com", cm.exception.detail)
+        self.assertIn("http:// or https://", cm.exception.detail)
+
+        # Unsupported URL scheme raises HTTPException 400 (MCPServerConfig object)
+        wc_ftp = WorkerConfig(mcp_servers=[MCPServerConfig(name="obj-ftp", type="http", url="ftp://example.com")])
+        with self.assertRaises(HTTPException) as cm:
+            validate_mcp_servers_for_chat(MagicMock(worker_config=wc_ftp))
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("obj-ftp", cm.exception.detail)
+        self.assertIn("ftp://example.com", cm.exception.detail)
+        self.assertIn("http:// or https://", cm.exception.detail)
+
+        # Invalid URL format raises HTTPException 400 (dict)
+        mock_cfg.worker_config = MagicMock(mcp_servers=[{"name": "dict-bad", "type": "http", "url": "invalid url"}])
+        with self.assertRaises(HTTPException) as cm:
+            validate_mcp_servers_for_chat(mock_cfg)
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("dict-bad", cm.exception.detail)
+        self.assertIn("http:// or https://", cm.exception.detail)
+
+        # Invalid URL format raises HTTPException 400 (MCPServerConfig object)
+        wc_bad = WorkerConfig(mcp_servers=[MCPServerConfig(name="obj-bad", type="http", url="http://")])
+        with self.assertRaises(HTTPException) as cm:
+            validate_mcp_servers_for_chat(MagicMock(worker_config=wc_bad))
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("obj-bad", cm.exception.detail)
+        self.assertIn("http:// or https://", cm.exception.detail)
+
+        # Missing or empty URL raises HTTPException 400 (MCPServerConfig object)
+        wc_empty = WorkerConfig(mcp_servers=[MCPServerConfig(name="obj-empty", type="http", url=None)])
+        with self.assertRaises(HTTPException) as cm:
+            validate_mcp_servers_for_chat(MagicMock(worker_config=wc_empty))
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("obj-empty", cm.exception.detail)
+        self.assertIn("http:// or https://", cm.exception.detail)
 
 
 if __name__ == "__main__":
