@@ -408,7 +408,9 @@ HiveGate is built in the open, and these people have contributed to it:
   the Qdrant healthcheck that always failed (#154), and mapped the OAuth discovery metadata
   of GitHub's hosted MCP server (#139)
 - [@rajshadow](https://github.com/rajshadow) — made `POST /v2/agents/{id}/session/clear` actually
-  delete the session and its runs, instead of reporting success and keeping them (#161)
+  delete the session and its runs, instead of reporting success and keeping them (#161), and
+  made a failed model call return an error (502, or an SSE `error` event when streaming)
+  instead of a 200 with the provider's error as the reply (#205)
 - [@arpitkjaiswal](https://github.com/arpitkjaiswal) — documented the Bright Data toolkit's three
   settings in the README's Environment Variables table (#147)
 
