@@ -6,6 +6,7 @@ empty-toolset guard, and that non-MCP agents bypass the MCP path entirely.
 """
 
 import json
+import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -49,10 +50,12 @@ def _patches():
 
 class TestMcpChatRoute(unittest.TestCase):
     def setUp(self):
-        import os
-
-        os.environ["SKIP_DB_TABLE_CHECK"] = "true"
-        os.environ["PROMPT_STORAGE_BACKEND"] = "service"
+        env_patch = patch.dict(
+            os.environ,
+            {"SKIP_DB_TABLE_CHECK": "true", "PROMPT_STORAGE_BACKEND": "service"},
+        )
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
 
         from api.routes.v2.agents import _agent_cache, _cache_lock, _run_cache
 
@@ -238,12 +241,62 @@ class TestMcpChatRoute(unittest.TestCase):
                 {"name": "git", "type": "stdio", "command": "npx"},
             ]
         )
-        resp = self._run([], agent_data=agent_data, stream=False)
+        fake_mcp = _FakeMCP()
+        mock_build = MagicMock(return_value=[fake_mcp])
+        mock_impl = MagicMock()
+
+        envp, storep, promptsp, infop = _patches()
+        with envp, storep, promptsp as mock_prompts, infop as mock_info:
+            mock_info.return_value = AgentInfoDB(**agent_data)
+            mock_prompts.get_prompt.return_value = self._mock_prompt()
+            with (
+                patch("api.routes.v2.agents.build_mcp_toolkits", mock_build),
+                patch("api.routes.v2.agents.get_agent_impl", mock_impl),
+            ):
+                resp = self.client.post("/v2/agents/mcp-agent/chat", json=self._body(stream=False))
+
         self.assertEqual(resp.status_code, 400)
         detail = resp.json()["detail"]
         self.assertIn("git", detail)
         self.assertIn("stdio", detail)
         self.assertIn("'http', 'streamable-http'", detail)
+
+        # Validation happens before MCP toolkit construction or chat execution
+        mock_build.assert_not_called()
+        mock_impl.assert_not_called()
+        self.assertFalse(fake_mcp.entered, "MCP toolkit must not be connected when validation fails")
+
+    def test_mixed_stdio_and_http_configuration_rejection(self):
+        agent_data = self._agent_with_mcp_servers(
+            [
+                {"name": "git", "type": "stdio", "command": "npx"},
+                {"name": "github", "type": "http", "url": "https://api.github.com/mcp"},
+            ]
+        )
+        fake_mcp = _FakeMCP()
+        mock_build = MagicMock(return_value=[fake_mcp])
+        mock_impl = MagicMock()
+
+        envp, storep, promptsp, infop = _patches()
+        with envp, storep, promptsp as mock_prompts, infop as mock_info:
+            mock_info.return_value = AgentInfoDB(**agent_data)
+            mock_prompts.get_prompt.return_value = self._mock_prompt()
+            with (
+                patch("api.routes.v2.agents.build_mcp_toolkits", mock_build),
+                patch("api.routes.v2.agents.get_agent_impl", mock_impl),
+            ):
+                resp = self.client.post("/v2/agents/mcp-agent/chat", json=self._body(stream=False))
+
+        self.assertEqual(resp.status_code, 400)
+        detail = resp.json()["detail"]
+        self.assertIn("git", detail)
+        self.assertIn("stdio", detail)
+        self.assertIn("'http', 'streamable-http'", detail)
+
+        # Validation happens before MCP toolkit construction or chat execution
+        mock_build.assert_not_called()
+        mock_impl.assert_not_called()
+        self.assertFalse(fake_mcp.entered, "MCP toolkit must not be connected when validation fails")
 
     def test_streaming_request_rejected_before_sse_starts(self):
         agent_data = self._agent_with_mcp_servers([{"name": "git", "type": "stdio", "command": "npx"}])
@@ -406,6 +459,33 @@ class TestMcpChatRoute(unittest.TestCase):
         self.assertEqual(cm.exception.status_code, 400)
         self.assertIn("obj-empty", cm.exception.detail)
         self.assertIn("http:// or https://", cm.exception.detail)
+
+        # Mixed HTTP + stdio raises HTTPException 400 (dict)
+        mock_cfg.worker_config = MagicMock(
+            mcp_servers=[
+                {"name": "valid-http", "type": "http", "url": "https://example.com/mcp"},
+                {"name": "invalid-stdio", "type": "stdio"},
+            ]
+        )
+        with self.assertRaises(HTTPException) as cm:
+            validate_mcp_servers_for_chat(mock_cfg)
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("invalid-stdio", cm.exception.detail)
+        self.assertIn("stdio", cm.exception.detail)
+        self.assertIn("'http', 'streamable-http'", cm.exception.detail)
+
+        # Mixed HTTP + stdio raises HTTPException 400 (MCPServerConfig object)
+        wc_mixed = WorkerConfig(
+            mcp_servers=[
+                MCPServerConfig(name="obj-valid-http", type="http", url="https://example.com/mcp"),
+                MCPServerConfig(name="obj-invalid-stdio", type="stdio", command="npx"),
+            ]
+        )
+        with self.assertRaises(HTTPException) as cm:
+            validate_mcp_servers_for_chat(MagicMock(worker_config=wc_mixed))
+        self.assertEqual(cm.exception.status_code, 400)
+        self.assertIn("obj-invalid-stdio", cm.exception.detail)
+        self.assertIn("stdio", cm.exception.detail)
 
 
 if __name__ == "__main__":
