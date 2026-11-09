@@ -113,7 +113,7 @@ pygments==2.21.0
 pyjwt==2.15.1
 pypdf==6.21.4
 pyperclip==1.11.0
-python-dateutil==3.0.0
+python-dateutil==4.0.0
 python-docx==1.2.0
 python-dotenv==1.2.4
 python-multipart==0.0.33
