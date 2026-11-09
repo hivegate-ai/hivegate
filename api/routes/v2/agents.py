@@ -9,6 +9,7 @@ import zlib
 from contextlib import AsyncExitStack
 from threading import Lock
 from typing import Any, AsyncGenerator, Dict, List, Optional, cast
+from urllib.parse import urlsplit
 
 from agno.agent import Agent
 from agno.db.base import SessionType
@@ -897,6 +898,71 @@ async def get_agent(
     return agent, prompt_data, cache_key, agent_config
 
 
+SUPPORTED_MCP_TRANSPORTS = ("http", "streamable-http")
+VALID_HTTP_SCHEMES = ("http", "https")
+
+
+def validate_mcp_servers_for_chat(agent_config: AgentConfig | None) -> None:
+    """Validate that declared MCP servers use supported transports for chat agents.
+
+    Chat agents only support HTTP transports ('http', 'streamable-http') with a valid,
+    absolute HTTP or HTTPS URL. Unsupported transports (e.g. 'stdio', 'sse'), malformed
+    URLs, or unsupported schemes (e.g. 'ftp://') raise HTTPException(400) so callers fail
+    loud rather than silently dropping tools.
+    """
+    worker_config = getattr(agent_config, "worker_config", None)
+    servers = list(getattr(worker_config, "mcp_servers", None) or []) if worker_config else []
+    if not servers:
+        return
+
+    supported_str = ", ".join(repr(t) for t in SUPPORTED_MCP_TRANSPORTS)
+    for server in servers:
+        if isinstance(server, dict):
+            server_name = server.get("name") or "unknown"
+            raw_transport = server.get("type") or "stdio"
+            raw_url = server.get("url")
+        else:
+            server_name = getattr(server, "name", None) or "unknown"
+            raw_transport = getattr(server, "type", None) or "stdio"
+            raw_url = getattr(server, "url", None)
+
+        transport = str(raw_transport).strip().lower()
+        if transport not in SUPPORTED_MCP_TRANSPORTS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Unsupported MCP transport '{raw_transport}' for server '{server_name}'. "
+                    f"Supported transports for chat agents are: {supported_str}."
+                ),
+            )
+
+        if not raw_url or not str(raw_url).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Missing or empty URL for MCP server '{server_name}' with transport '{raw_transport}'. "
+                    f"Supported transports for chat agents are: {supported_str}. "
+                    "HTTP MCP servers require a valid absolute URL with http:// or https:// scheme."
+                ),
+            )
+
+        url_str = str(raw_url).strip()
+        try:
+            parsed = urlsplit(url_str)
+        except ValueError:
+            parsed = None
+
+        if parsed is None or parsed.scheme.lower() not in VALID_HTTP_SCHEMES or not parsed.netloc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Invalid URL '{url_str}' for MCP server '{server_name}' with transport '{raw_transport}'. "
+                    f"Supported transports for chat agents are: {supported_str}. "
+                    "HTTP MCP servers require a valid absolute URL with http:// or https:// scheme."
+                ),
+            )
+
+
 @v2_agents_router.post("/{agent_id}/chat", status_code=status.HTTP_200_OK)
 async def chat_with_agent_v2(
     agent_id: str,
@@ -925,6 +991,8 @@ async def chat_with_agent_v2(
         agent, prompt_data, cache_key, agent_config = await get_agent(
             db, agent_id, body.model, body.user_id, body.session_id
         )
+
+        validate_mcp_servers_for_chat(agent_config)
 
         # MCP-tool agents (config.worker_config.mcp_servers): build a fresh agent per
         # request and run it inside the live MCP session(s). We bypass the agent cache
