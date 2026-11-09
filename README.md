@@ -413,6 +413,8 @@ HiveGate is built in the open, and these people have contributed to it:
   instead of a 200 with the provider's error as the reply (#205)
 - [@arpitkjaiswal](https://github.com/arpitkjaiswal) — documented the Bright Data toolkit's three
   settings in the README's Environment Variables table (#147)
+- [@rayulumukku](https://github.com/rayulumukku) — made a chat agent with an MCP server it can't
+  use (stdio, sse) fail with a 400 naming the server, instead of answering with no tools (#206)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
