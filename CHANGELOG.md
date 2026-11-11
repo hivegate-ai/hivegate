@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-11
+
+### Upgrading
+- A model call that fails (a bad API key, an out-of-credits account, a provider outage) now
+  returns **HTTP 502** with `status`, `error` and `detail` from non-streaming agent chat and team
+  runs. It used to return 200 with the provider's raw error as the answer. Streaming routes still
+  return 200, and now end with an SSE `error` event carrying the same fields. A client that read
+  the error text out of a 200 reply needs to change (#205, @rajshadow)
+- A chat agent configured with an MCP transport chat does not support (`stdio`, `sse`), or with
+  an MCP URL that is not absolute HTTP or HTTPS, is now refused with HTTP 400. It used to run
+  without those tools and say nothing. Supervisor and worker agents keep `stdio` (#206,
+  @rayulumukku)
+
+### Fixed
+- `POST /v2/agents/{agent_id}/session/clear` now deletes the session's history. It used to return
+  success and delete nothing (#161, @rajshadow)
+- `docker compose up --wait` no longer fails on the Qdrant healthcheck, which is removed
+  (#154, @Arun100203)
+
+### Docs
+- `DOCS_ENABLED` and `CORS_ORIGIN_LIST` are documented (#145, @yusufthecoder474)
+- The Bright Data settings are documented (#147, @arpitkjaiswal)
+- The PyPI summary and README title name HiveGate as an AI agent runtime (#163)
+
+### Contributors
+- Thanks to @Arun100203 and @coughlmao for the MCP OAuth spikes for GitHub (#139) and Atlassian
+  (#141), and to everyone named above.
+
 ## [0.3.1] - 2026-10-31
 
 First release on PyPI.
@@ -133,7 +161,8 @@ Initial open source release.
 - Input validation with Pydantic models
 - SQL injection prevention via SQLAlchemy ORM
 
-[Unreleased]: https://github.com/hivegate-ai/hivegate/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/hivegate-ai/hivegate/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/hivegate-ai/hivegate/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/hivegate-ai/hivegate/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/hivegate-ai/hivegate/releases/tag/v0.3.0
 [0.2.1]: https://github.com/hivegate-ai/hivegate/releases/tag/v0.2.1
