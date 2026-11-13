@@ -126,6 +126,11 @@ def _validate_task_title(title: str) -> None:
         raise ValueError("Task title must be a nonempty string.")
 
 
+def _validate_task_due(due: date | None) -> None:
+    if due is not None and (not isinstance(due, date) or isinstance(due, datetime)):
+        raise ValueError("Task due must be a calendar date.")
+
+
 @dataclass(frozen=True)
 class TaskCreateRequest:
     """Fields for creating a task with a nonempty title."""
@@ -136,6 +141,9 @@ class TaskCreateRequest:
 
     def __post_init__(self) -> None:
         _validate_task_title(self.title)
+        _validate_task_due(self.due)
+        if self.notes == "":
+            object.__setattr__(self, "notes", None)
 
 
 class _Unset(Enum):
@@ -163,6 +171,13 @@ class TaskUpdateRequest:
             _validate_task_title(self.title)
         if self.notes == "":
             raise ValueError("Use None to clear notes.")
+        if self.due is not UNSET:
+            _validate_task_due(self.due)
+
+    def validate_changes(self) -> None:
+        """Require at least one supplied field before sending an update."""
+        if self.title is UNSET and self.notes is UNSET and self.due is UNSET:
+            raise ValueError("Task update must supply at least one change.")
 
 
 # Free/Busy
