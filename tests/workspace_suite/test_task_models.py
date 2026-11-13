@@ -64,6 +64,39 @@ def test_task_update_rejects_empty_notes() -> None:
         TaskUpdateRequest(notes="")
 
 
+def test_task_create_treats_empty_notes_as_absent() -> None:
+    assert TaskCreateRequest(title="Water plants", notes="").notes is None
+    assert TaskCreateRequest(title="Water plants", notes="  ").notes == "  "
+
+
+def test_task_update_requires_a_supplied_change() -> None:
+    with pytest.raises(ValueError, match="at least one change"):
+        TaskUpdateRequest().validate_changes()
+    TaskUpdateRequest(notes=None).validate_changes()
+    TaskUpdateRequest(due=None).validate_changes()
+
+
+class CustomDatetime(datetime):
+    pass
+
+
+@pytest.mark.parametrize("request_type", [TaskCreateRequest, TaskUpdateRequest])
+@pytest.mark.parametrize(
+    "due",
+    [
+        datetime(2026, 11, 20),
+        datetime(2026, 11, 20, 12, tzinfo=timezone.utc),
+        CustomDatetime(2026, 11, 20),
+        "2026-11-20",
+    ],
+)
+def test_task_write_rejects_non_date_due(
+    request_type: type[TaskCreateRequest] | type[TaskUpdateRequest], due: datetime | str
+) -> None:
+    with pytest.raises(ValueError, match="calendar date"):
+        request_type(title="Water plants", due=due)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("request_type", [TaskCreateRequest, TaskUpdateRequest])
 @pytest.mark.parametrize("title", ["", None])
 def test_task_write_rejects_invalid_title(
