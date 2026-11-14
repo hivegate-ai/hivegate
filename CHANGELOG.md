@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrading
+- Run `hivegate migrate` (or apply `db/migrations/012_create_mcp_servers_table.sql`) to create
+  the `mcp_servers` table. Header values are encrypted with `SECRET_TOKEN_ENC_KEY`, the key user
+  tokens already use
+
+### Added
+- MCP server registry: `/v2/mcp-servers` registers an HTTP MCP server once (id, URL, transport,
+  optional static headers). Header values are encrypted at rest and responses list only their
+  names. Agents cannot reference these servers yet; that comes next (#91)
+
 ## [0.4.0] - 2026-11-11
 
 ### Upgrading

@@ -56,6 +56,12 @@ def get_v2_router() -> APIRouter:
     v2_router.include_router(v2_skills_router)
     logging.info("v2 skills router included successfully")
 
+    # Include the v2 MCP servers router
+    from api.routes.v2.mcp_servers import v2_mcp_servers_router
+
+    v2_router.include_router(v2_mcp_servers_router)
+    logging.info("v2 MCP servers router included successfully")
+
     # Include the v2 engines router
     from api.routes.v2.engines import v2_engines_router
 

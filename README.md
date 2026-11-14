@@ -181,6 +181,7 @@ All endpoints are documented at `/docs`. Key endpoints:
 | Tokens | `GET/POST /v2/users/{user_id}/tokens` | Manage OAuth tokens |
 | Prompts | `GET/POST /v2/prompts` | Manage prompt templates |
 | Skills | `GET/POST /v2/skills` | Manage reusable skill definitions |
+| MCP Servers | `GET/POST /v2/mcp-servers` | Register MCP servers once; header values are stored encrypted and never returned |
 | Engines | `GET/POST /v2/engines` | Manage supervisor execution engines |
 | Targets | `GET/POST /v2/targets` | Manage supervisor run targets |
 | Approvals | `GET/POST /v2/approvals` | Review and decide on pending job approvals |

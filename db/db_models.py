@@ -258,6 +258,29 @@ class ExecutionEngineDB(Base):
     is_active = Column(Boolean, default=True, nullable=False, index=True)
 
 
+class MCPServerDB(Base):
+    """A registered MCP server that agents can reference by id (#91).
+
+    Header values are encrypted at rest (same key as user tokens); header_names is kept in
+    the clear so reads can say which headers are set without decrypting them.
+    """
+
+    __tablename__ = "mcp_servers"
+
+    id = Column(String(63), primary_key=True, index=True)  # slug, also the tool-name prefix (#95)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    url = Column(Text, nullable=False)
+    transport = Column(String(32), nullable=False, default="streamable-http")
+    auth_type = Column(String(32), nullable=False, default="none")  # none, static_headers
+    encrypted_headers = Column(Text, nullable=True)
+    header_names = Column(Text, nullable=True)  # JSON list of header names
+    tenant_id = Column(String(255), nullable=True, index=True)  # NULL = shared; scoping is v0.9.0 (#226)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+
 class ExecutionTargetDB(Base):
     """Registry of available execution targets (VMs, K8s clusters, etc.)."""
 
