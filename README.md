@@ -411,7 +411,8 @@ HiveGate is built in the open, and these people have contributed to it:
   delete the session and its runs, instead of reporting success and keeping them (#161), and
   made a failed model call return an error (502, or an SSE `error` event when streaming)
   instead of a 200 with the provider's error as the reply (#205), and started the Tasks toolkit:
-  the shared task models and provider protocol (#219) and the Google Tasks provider (#221)
+  the shared task models and provider protocol (#219), the Google Tasks provider (#221) and the
+  Microsoft To Do provider (#224)
 - [@arpitkjaiswal](https://github.com/arpitkjaiswal) — documented the Bright Data toolkit's three
   settings in the README's Environment Variables table (#147)
 - [@rayulumukku](https://github.com/rayulumukku) — made a chat agent with an MCP server it can't
