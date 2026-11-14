@@ -4,6 +4,8 @@ Runs against an in-memory SQLite database with a real Fernet key, so encryption 
 soft-delete/reactivate behaviour are exercised end to end rather than mocked.
 """
 
+import datetime
+import logging
 import os
 import unittest
 from typing import Any
@@ -17,7 +19,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from api.services.token_security import TokenEncryption
+from api.services.token_security import TokenEncryption, TokenSecurityError
 from db.db_models import MCPServerDB
 from db.mcp_server_crud import (
     create_mcp_server,
@@ -119,6 +121,39 @@ class TestMCPServerCRUD(_RegistryTestBase):
         self.assertEqual(get_mcp_server_headers(server), {})
         self.assertEqual(len(get_all_mcp_servers(self.db, include_inactive=True)), 1)
 
+    def test_header_values_never_reach_the_logs(self):
+        # TokenEncryption.encrypt_token_data logs a prefix of keys with these names.
+        headers = {"api_key": "sk-live-SECRET1", "token": "tok-SECRET2", "access_token": "at-SECRET3"}
+        with self.assertLogs(level=logging.DEBUG) as logs:
+            server = create_mcp_server(self.db, "crm", "CRM", "https://crm.example.com/mcp", headers=headers)
+            self.assertEqual(get_mcp_server_headers(server), headers)
+            update_mcp_server(self.db, "crm", headers=headers)
+        joined = "\n".join(logs.output)
+        for prefix in ("sk-live", "tok-SEC", "at-SECR", "SECRET"):
+            self.assertNotIn(prefix, joined)
+
+    def test_delete_wipes_headers(self):
+        create_mcp_server(self.db, "crm", "CRM", "https://crm.example.com/mcp", headers={"Authorization": "leaked"})
+        soft_delete_mcp_server(self.db, "crm")
+        row = self.db.query(MCPServerDB).filter(MCPServerDB.id == "crm").one()
+        self.assertFalse(row.is_active)
+        self.assertEqual(row.auth_type, "none")
+        self.assertIsNone(row.encrypted_headers)
+        self.assertIsNone(row.header_names)
+
+    def test_reactivation_resets_created_at(self):
+        server = create_mcp_server(self.db, "crm", "CRM", "https://crm.example.com/mcp")
+        server.created_at = datetime.datetime(2020, 1, 1)
+        self.db.commit()
+        soft_delete_mcp_server(self.db, "crm")
+        server = create_mcp_server(self.db, "crm", "CRM", "https://crm.example.com/mcp")
+        self.assertGreater(server.created_at, datetime.datetime(2021, 1, 1))
+
+    def test_description_unset_keeps_none_clears(self):
+        create_mcp_server(self.db, "crm", "CRM", "https://crm.example.com/mcp", description="old")
+        self.assertEqual(update_mcp_server(self.db, "crm", name="x").description, "old")
+        self.assertIsNone(update_mcp_server(self.db, "crm", description=None).description)
+
     def test_list_is_ordered_by_id(self):
         create_mcp_server(self.db, "zeta", "Z", "https://z.example.com/mcp")
         create_mcp_server(self.db, "alpha", "A", "https://a.example.com/mcp")
@@ -187,15 +222,68 @@ class TestMCPServerRoutes(_RegistryTestBase):
             {"transport": "sse"},
             {"headers": {"Bad Name": "x"}},
             {"headers": {"Authorization": ""}},
+            {"headers": {"Authorization": 123}},
+            {"headers": ["Authorization", "x"]},
             {"headers": {"Authorization": "a\r\nX-Injected: 1"}},
             {"headers": {"X-Key": "a", "x-key": "b"}},
             {"headers": {f"H{i}": "v" for i in range(21)}},
+            {"headers": {"Authorization": "Bearer tok\u20acn"}},
+            {"headers": {"Authorization": "Bearer x "}},
+            {"headers": {"Authorization": " Bearer x"}},
+            {"headers": {"Authorization": "a\tb"}},
+            {"headers": {"Mcp-Session-Id": "pinned"}},
+            {"headers": {"content-length": "0"}},
+            {"headers": {"Host": "evil.example.com"}},
+            {"headers": {"Accept": "text/plain"}},
+            {"url": "https://user:pass@crm.example.com/mcp"},
+            {"url": "https://token@crm.example.com/mcp"},
+            {"url": "https:///mcp"},
             {"name": ""},
         ]
         for overrides in cases:
             with self.subTest(overrides=overrides):
                 self.assertEqual(self._create(**overrides).status_code, 422)
         self.assertEqual(self.client.get("/v2/mcp-servers").json(), [])
+
+    def test_rejected_header_value_is_not_echoed(self):
+        response = self._create(headers={"Authorization": "Bearer sk-SECRET "})
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn("sk-SECRET", response.text)
+
+    def test_query_string_url_is_allowed(self):
+        response = self._create(url="https://mcp.example.com/mcp?workspace=1")
+        self.assertEqual(response.status_code, 201, response.text)
+
+    def test_concurrent_duplicate_is_409_not_500(self):
+        self.assertEqual(self._create().status_code, 201)
+        # Simulate losing the race: the existence check misses the row the other request wrote.
+        with patch("api.routes.v2.mcp_servers.get_mcp_server", return_value=None):
+            response = self._create()
+        self.assertEqual(response.status_code, 409, response.text)
+
+    def test_missing_encryption_key_is_named(self):
+        with patch("db.mcp_server_crud.get_token_encryption", side_effect=TokenSecurityError("no key")):
+            response = self._create(headers={"Authorization": "x"})
+            self.assertEqual(response.status_code, 500)
+            self.assertIn("SECRET_TOKEN_ENC_KEY", response.json()["detail"])
+            self.assertEqual(self.client.get("/v2/mcp-servers").json(), [])  # rolled back
+
+            self.assertEqual(self._create().status_code, 201)  # no headers, no key needed
+            response = self.client.put("/v2/mcp-servers/crm", json={"headers": {"A": "b"}})
+            self.assertEqual(response.status_code, 500)
+            self.assertIn("SECRET_TOKEN_ENC_KEY", response.json()["detail"])
+
+    def test_update_nulls(self):
+        self._create(description="old", headers={"Authorization": "one"})
+        response = self.client.put("/v2/mcp-servers/crm", json={"name": "CRM 2"})
+        self.assertEqual(response.json()["description"], "old")  # omitted keeps
+        response = self.client.put("/v2/mcp-servers/crm", json={"description": None})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json()["description"])  # null clears
+        for field in ("name", "url", "transport", "headers"):
+            with self.subTest(field=field):
+                self.assertEqual(self.client.put("/v2/mcp-servers/crm", json={field: None}).status_code, 422)
+        self.assertEqual(self.client.get("/v2/mcp-servers/crm").json()["header_names"], ["Authorization"])
 
     def test_update(self):
         self._create(headers={"Authorization": "one"})
@@ -208,15 +296,19 @@ class TestMCPServerRoutes(_RegistryTestBase):
         self.assertEqual(response.json()["auth_type"], "none")
 
         self.assertEqual(self.client.put("/v2/mcp-servers/crm", json={"url": "ftp://x"}).status_code, 422)
+        bad = self.client.put("/v2/mcp-servers/crm", json={"headers": {"Authorization": "sk-SECRET "}})
+        self.assertEqual(bad.status_code, 422)
+        self.assertNotIn("sk-SECRET", bad.text)
         self.assertEqual(self.client.put("/v2/mcp-servers/nope", json={"name": "x"}).status_code, 404)
 
     def test_delete(self):
-        self._create()
+        self._create(headers={"Authorization": "x"})
         self.assertEqual(self.client.delete("/v2/mcp-servers/crm").status_code, 204)
         self.assertEqual(self.client.get("/v2/mcp-servers/crm").status_code, 404)
         self.assertEqual(self.client.delete("/v2/mcp-servers/crm").status_code, 404)
         listed = self.client.get("/v2/mcp-servers?include_inactive=true").json()
         self.assertEqual([(s["id"], s["is_active"]) for s in listed], [("crm", False)])
+        self.assertEqual(listed[0]["header_names"], [])  # wiped on delete
         # The id can be registered again after a delete.
         self.assertEqual(self._create().status_code, 201)
 

@@ -65,6 +65,27 @@ class TokenEncryption:
             logging.error(f"Failed to initialize TokenEncryption: {e}")
             raise TokenSecurityError(f"Failed to initialize encryption: {e}")
 
+    def encrypt_secret_json(self, data: Dict[str, Any]) -> str:
+        """Encrypt a JSON-serialisable dict without logging anything about its contents.
+
+        encrypt_token_data logs a prefix of well-known token keys; this is for data whose
+        keys are user-chosen (e.g. MCP server headers), where any key may hold a secret.
+        Same output format as encrypt_token_data.
+        """
+        try:
+            encrypted = self._fernet.encrypt(json.dumps(data).encode())
+            return base64.b64encode(encrypted).decode()
+        except Exception as e:
+            raise TokenSecurityError(f"Encryption failed: {type(e).__name__}")
+
+    def decrypt_secret_json(self, encrypted_data: str) -> Dict[str, Any]:
+        """Decrypt what encrypt_secret_json produced, without logging its contents."""
+        try:
+            decrypted = self._fernet.decrypt(base64.b64decode(encrypted_data.encode()))
+            return json.loads(decrypted.decode())
+        except Exception as e:
+            raise TokenSecurityError(f"Decryption failed: {type(e).__name__}")
+
     def encrypt_token_data(self, token_data: Dict[str, Any]) -> str:
         """
         Encrypt token data.

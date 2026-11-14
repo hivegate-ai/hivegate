@@ -9,7 +9,7 @@ stored in the clear so the API can show which headers are configured without the
 import datetime
 import json
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -19,12 +19,17 @@ from db.db_models import MCPServerDB
 AUTH_NONE = "none"
 AUTH_STATIC_HEADERS = "static_headers"
 
+# Marks an update argument that was not given, so None can mean "clear" for nullable fields.
+UNSET: Any = object()
+
 
 def _apply_headers(server: MCPServerDB, headers: Optional[Dict[str, str]]) -> None:
     """Set auth_type, encrypted_headers and header_names from a header dict (empty = none)."""
     if headers:
         server.auth_type = AUTH_STATIC_HEADERS  # type: ignore[assignment]
-        server.encrypted_headers = get_token_encryption().encrypt_token_data(dict(headers))  # type: ignore[assignment]
+        # encrypt_secret_json, not encrypt_token_data: the latter logs a prefix of keys named
+        # token/api_key/access_token, and those are valid header names.
+        server.encrypted_headers = get_token_encryption().encrypt_secret_json(dict(headers))  # type: ignore[assignment]
         server.header_names = json.dumps(sorted(headers))  # type: ignore[assignment]
     else:
         server.auth_type = AUTH_NONE  # type: ignore[assignment]
@@ -41,14 +46,20 @@ def create_mcp_server(
     description: Optional[str] = None,
     headers: Optional[Dict[str, str]] = None,
 ) -> MCPServerDB:
-    """Create a server, or reactivate a soft-deleted one with the same id (overwriting it)."""
+    """Create a server, or reactivate a soft-deleted one with the same id (overwriting it).
+
+    A reactivated row is a new server in every way that matters (URL and credentials may
+    differ), so its created_at is reset too.
+    """
     try:
         server = db.query(MCPServerDB).filter(MCPServerDB.id == server_id, ~MCPServerDB.is_active).first()
         if server is None:
             server = MCPServerDB(id=server_id)
             db.add(server)
         else:
-            server.updated_at = datetime.datetime.utcnow()  # type: ignore[assignment]
+            now = datetime.datetime.utcnow()
+            server.created_at = now  # type: ignore[assignment]
+            server.updated_at = now  # type: ignore[assignment]
 
         server.name = name  # type: ignore[assignment]
         server.url = url  # type: ignore[assignment]
@@ -87,10 +98,14 @@ def update_mcp_server(
     name: Optional[str] = None,
     url: Optional[str] = None,
     transport: Optional[str] = None,
-    description: Optional[str] = None,
+    description: Optional[str] = UNSET,
     headers: Optional[Dict[str, str]] = None,
 ) -> Optional[MCPServerDB]:
-    """Update an active server. headers: None keeps them, {} removes them, a dict replaces them."""
+    """Update an active server.
+
+    description: UNSET keeps it, None clears it. headers: None keeps them, {} removes them,
+    a dict replaces them.
+    """
     server = get_mcp_server(db, server_id)
     if server is None:
         return None
@@ -101,7 +116,7 @@ def update_mcp_server(
             server.url = url  # type: ignore[assignment]
         if transport is not None:
             server.transport = transport  # type: ignore[assignment]
-        if description is not None:
+        if description is not UNSET:
             server.description = description  # type: ignore[assignment]
         if headers is not None:
             _apply_headers(server, headers)
@@ -116,11 +131,16 @@ def update_mcp_server(
 
 
 def soft_delete_mcp_server(db: Session, server_id: str) -> bool:
-    """Mark a server inactive. Returns False when there is no active server with that id."""
+    """Mark a server inactive and wipe its headers. False when there is no active server with that id.
+
+    The headers are deleted, not kept: someone deleting a server because its token leaked
+    expects the token to be gone. Re-creating the id starts from scratch anyway.
+    """
     server = get_mcp_server(db, server_id)
     if server is None:
         return False
     server.is_active = False  # type: ignore[assignment]
+    _apply_headers(server, None)
     db.commit()
     logging.info(f"Soft deleted MCP server {server_id}")
     return True
@@ -140,4 +160,4 @@ def get_mcp_server_headers(server: MCPServerDB) -> Dict[str, str]:
     """Decrypt the server's headers for connecting. Raises TokenSecurityError on a bad key."""
     if server.auth_type != AUTH_STATIC_HEADERS or not server.encrypted_headers:
         return {}
-    return get_token_encryption().decrypt_token_data(server.encrypted_headers)  # type: ignore[arg-type]
+    return get_token_encryption().decrypt_secret_json(server.encrypted_headers)  # type: ignore[arg-type]
