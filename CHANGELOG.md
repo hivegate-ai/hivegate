@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the rejected value there, and for a missing field the whole request body, so a typo next to an
   access token or an MCP header sent the secret back in the error. `loc`, `msg` and `type` are
   unchanged. A client that read `input` out of a 422 needs to change
+- `system_prompt` and `tools` on `POST /v2/agents/{agent_id}/chat` now take effect. They used to
+  be accepted and ignored, so a client that already sends them will see them apply. An unknown
+  toolkit name in `tools` is now a 400 (#88, @visveshkhanna)
 
 ### Fixed
 - Chat agents now get agno's generated system prompt after their stored prompt: the current
@@ -50,6 +53,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chat keeps working. Each chunk records `embedding_model` and `embedding_dimensions`. Unset,
   behaviour is unchanged: `google:gemini-embedding-001` in `unified_knowledge` (#119,
   @visveshkhanna)
+
+- A chat request's `system_prompt` is appended to the agent's stored prompt as extra
+  instructions for that request. It never replaces the stored prompt, and `{...}` or `$...` in it
+  can't pull session values such as `user_id` into the prompt (#88, @visveshkhanna)
+- A chat request's `tools` (for example `["calendar", "email"]`) narrows the optional toolkits the
+  agent gets. It can only remove toolkits the prompt's `available_tools:` tag enables, never add
+  any. `[]` turns them all off, and the datetime resolver always stays on. A request with either
+  field gets its own agent cache entry, and a `chat/commit` resuming that run sends the same
+  values (#88, @visveshkhanna)
 
 ### Tests
 - The two scripts in the repo root that `pytest tests/` never ran are gone (#142, @visveshkhanna).

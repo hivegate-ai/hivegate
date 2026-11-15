@@ -4,7 +4,7 @@ import time
 import logging
 from datetime import datetime
 from contextlib import AsyncExitStack, asynccontextmanager
-from typing import AsyncIterator, Callable, List, Optional
+from typing import AsyncIterator, Callable, Iterable, List, Optional
 
 from agno.agent import Agent
 from functools import lru_cache
@@ -120,6 +120,72 @@ def extract_available_tools(response: PullPromptResponse) -> set[str]:
             return tools
 
     return set()
+
+
+# Optional toolkits an `available_tools:` tag can enable. The datetime resolver is
+# always on and MCP tools are configured separately, so neither is listed here.
+KNOWN_TOOLKITS = frozenset({"brightdata", "calendar", "contacts", "drive", "email", "user_control_flow"})
+
+
+def normalize_toolkits(toolkits: Optional[Iterable[str]]) -> Optional[set[str]]:
+    """Lowercase and strip toolkit names, rejecting any not in KNOWN_TOOLKITS.
+
+    None stays None (no restriction); an empty list stays an empty set (no optional
+    toolkits). Raises ValueError naming the unknown toolkits and the valid ones.
+    """
+    if toolkits is None:
+        return None
+    names = {name.strip().lower() for name in toolkits if name.strip()}
+    unknown = names - KNOWN_TOOLKITS
+    if unknown:
+        raise ValueError(
+            f"Unknown toolkit(s): {', '.join(sorted(unknown))}. Valid toolkits: {', '.join(sorted(KNOWN_TOOLKITS))}"
+        )
+    return names
+
+
+def resolve_toolkits(available: set[str], requested: Optional[Iterable[str]] = None) -> set[str]:
+    """The toolkits an agent actually gets: the prompt's tag, narrowed by the request.
+
+    The request can only remove toolkits, never add one the prompt's `available_tools:`
+    tag doesn't list. None means no filter; [] turns every optional toolkit off.
+    """
+    names = normalize_toolkits(requested)
+    return set(available) if names is None else set(available) & names
+
+
+# Inserted after every "{" in caller text so agno's `{var}` regex can't match it (see
+# escape_context_variables). Invisible, and the model reads the brace as written.
+_ZERO_WIDTH_SPACE = "\u200b"
+
+
+def escape_context_variables(text: str) -> str:
+    """Make caller text inert to agno's `{var}` substitution in the system message.
+
+    With resolve_in_context (agno's default), agno rewrites `{name}` to `${name}` for every
+    session_state, dependencies and metadata key and for `user_id`, then runs
+    string.Template over the whole message. So a request containing `{user_id}`,
+    `{user_profile_json}` or a bare `$user_id` would pull those values into the prompt.
+    Doubling braces doesn't help: agno turns `{{user_id}}` into `{<value>}`. Instead, "$"
+    becomes "$$" (string.Template's own escape, rendered as "$") and a zero-width space
+    follows every "{", so no `{name}` pattern is left to match.
+    """
+    return text.replace("$", "$$").replace("{", "{" + _ZERO_WIDTH_SPACE)
+
+
+def compose_system_message(template: str, system_prompt: Optional[str] = None) -> str:
+    """Append a per-request system prompt to the stored template.
+
+    The stored, versioned prompt stays authoritative; the request text is added after it
+    as extra instructions instead of replacing it. It is joined onto the prompt string
+    itself: agno returns a `system_message` as-is, ignoring `instructions` and
+    `additional_context`. The stored template keeps its `{var}` placeholders; only the
+    request text is escaped. A blank system_prompt is ignored.
+    """
+    if not system_prompt or not system_prompt.strip():
+        return template
+    extra = escape_context_variables(system_prompt.strip())
+    return f"{template.rstrip()}\n\n## Additional instructions for this request\n\n{extra}"
 
 
 def slug_to_table_name(slug: str) -> str:
@@ -287,7 +353,17 @@ def get_agent(
     config: Optional[AgentConfig] = None,
     db_skills: Optional[List[SkillDB]] = None,
     extra_tools: Optional[list] = None,
+    system_prompt: Optional[str] = None,
+    tools: Optional[List[str]] = None,
 ) -> Agent:
+    """Build an agent from its stored prompt and config.
+
+    system_prompt: per-request instructions, appended to the stored template (it never
+        replaces it; see compose_system_message).
+    tools: per-request toolkit filter. It can only narrow the toolkits the prompt's
+        `available_tools:` tag enables; [] turns every optional toolkit off. Raises
+        ValueError for an unknown toolkit name.
+    """
     agent_slug_id = prompt.name
     db_table_name = slug_to_table_name(f"a_{agent_slug_id}_agent")
 
@@ -299,7 +375,7 @@ def get_agent(
                 agent_name = tag.split(":", 1)[1].strip()
                 break
 
-    system_prompt_template = prompt.template
+    system_prompt_template = compose_system_message(prompt.template, system_prompt)
 
     # Use environment-based debug mode if not explicitly provided
     if debug_mode is None:
@@ -333,8 +409,10 @@ def get_agent(
             clear_memories=True,
         )
 
-    # Extract available tools from tags (empty set means no optional toolkits)
-    available_tools = extract_available_tools(prompt)
+    # Optional toolkits from the prompt's tag (empty set means none), narrowed by the
+    # request. Filtering here, rather than in the selector's tools_filter, also covers
+    # brightdata and user_control_flow.
+    available_tools = resolve_toolkits(extract_available_tools(prompt), tools)
 
     # Default the per-provider toolkit instances to None so they are always defined at
     # the selector call below, regardless of the guard conditions. (Clears CodeQL
