@@ -40,6 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent still uses is a 409 naming the agents. Supervisor and container workers keep
   `worker_config.mcp_servers` (#91)
 
+### Tests
+- The two scripts in the repo root that `pytest tests/` never ran are gone (#142, @visveshkhanna).
+  `test_current_knowledge_service.py` read an attribute that no longer exists, patched the CRUD
+  functions after the service had already imported them, and swallowed every error, so it could
+  not fail; `tests/test_knowledge_service.py` covers what it meant to. `test_reproduce_issue.py`
+  needed a live server; the race it reproduced is now a unit test of the duplicate-key retry in
+  `create_user_token`
+
 ## [0.4.0] - 2026-11-11
 
 ### Upgrading
