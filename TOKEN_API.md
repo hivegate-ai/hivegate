@@ -54,6 +54,17 @@ For JWT-based authentication.
 - `issuer` - Token issuer
 - `audience` - Token audience
 
+## Tasks connections
+
+The client runs the user's OAuth consent flow and stores the grant with `POST /v2/users/{user_id}/tokens`, using the same user ID it sends to chat.
+
+| Integration key | Provider | Read and write scope | Read-only scope |
+|-----------------|----------|----------------------|-----------------|
+| `google_tasks` | `google` | `https://www.googleapis.com/auth/tasks` | `https://www.googleapis.com/auth/tasks.readonly` |
+| `microsoft_todo` | `microsoft` | `Tasks.ReadWrite` | `Tasks.Read` |
+
+Request offline access (`access_type=offline` for Google, `offline_access` for Microsoft) so the grant includes a refresh token. With a read-only grant, listing works and writes return a permission error.
+
 ## Endpoints
 
 ### Store Token

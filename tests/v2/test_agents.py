@@ -1720,19 +1720,21 @@ class TestGetAgentSystemPromptAndTools(unittest.TestCase):
 
 
 def test_known_toolkits_match_get_agent():
-    """KNOWN_TOOLKITS must list exactly the tag names get_agent() checks.
+    """KNOWN_TOOLKITS must list exactly the tag names get_agent() checks, plus the
+    toolkits chat registers through CHAT_TOOLKIT_FACTORIES (the Tasks toolkit, #196).
 
-    A toolkit added to get_agent() (say, the Tasks toolkit in #196) but not to
-    KNOWN_TOOLKITS would be refused with a 400 in a chat request's `tools`.
+    A toolkit added to either but not to KNOWN_TOOLKITS would be refused with a 400
+    in a chat request's `tools`.
     """
     import inspect
     import re
 
     from agents.agent import KNOWN_TOOLKITS, get_agent
+    from api.routes.v2.agents import CHAT_TOOLKIT_FACTORIES
 
     checked = set(re.findall(r'"(\w+)" in available_tools', inspect.getsource(get_agent)))
     assert checked, "get_agent() no longer checks available_tools by name; update this test"
-    assert checked == KNOWN_TOOLKITS
+    assert checked | set(CHAT_TOOLKIT_FACTORIES) == KNOWN_TOOLKITS
 
 
 def _resolve_like_agno(message: str) -> str:

@@ -4,7 +4,7 @@ import time
 import logging
 from datetime import datetime
 from contextlib import AsyncExitStack, asynccontextmanager
-from typing import AsyncIterator, Callable, Iterable, List, Optional
+from typing import AsyncIterator, Callable, Iterable, List, Mapping, Optional, Sequence
 
 from agno.agent import Agent
 from functools import lru_cache
@@ -28,6 +28,7 @@ from api.settings import api_settings
 from db.agent_info_crud import AgentConfig
 from db.db_models import SkillDB
 from db.session import db_engine, db_url  # noqa: F401  (db_url kept for callers)
+from toolkits.base import BaseToolkit
 from toolkits.calendar import CalendarToolkit
 from toolkits.contacts import ContactsToolkit
 from toolkits.drive import DriveToolkit
@@ -35,6 +36,8 @@ from toolkits.email import EmailToolkit
 from toolkits.token_cache import TokenCache
 
 logger = logging.getLogger(__name__)
+# Builds a toolkit's ordered provider candidates from (user_id, fetch_token_func)
+ToolkitFactory = Callable[[str, Callable[[str, str], Optional[str]]], Sequence[BaseToolkit]]
 # Create module-level token cache instance
 token_cache = TokenCache()
 
@@ -124,10 +127,11 @@ def extract_available_tools(response: PullPromptResponse) -> set[str]:
 
 # Optional toolkits an `available_tools:` tag can enable. The datetime resolver is
 # always on and MCP tools are configured separately, so neither is listed here.
-# Keep this in step with the `"<name>" in available_tools` checks in get_agent(): a
-# toolkit added there but not here is a 400 in a chat request's `tools`.
+# Keep this in step with the `"<name>" in available_tools` checks in get_agent() and the
+# chat route's CHAT_TOOLKIT_FACTORIES: a toolkit added there but not here is a 400 in a
+# chat request's `tools`.
 # tests/v2/test_agents.py::test_known_toolkits_match_get_agent fails when they drift.
-KNOWN_TOOLKITS = frozenset({"brightdata", "calendar", "contacts", "drive", "email", "user_control_flow"})
+KNOWN_TOOLKITS = frozenset({"brightdata", "calendar", "contacts", "drive", "email", "tasks", "user_control_flow"})
 
 
 def normalize_toolkits(toolkits: Optional[Iterable[str]]) -> Optional[set[str]]:
@@ -358,6 +362,7 @@ def get_agent(
     extra_tools: Optional[list] = None,
     system_prompt: Optional[str] = None,
     tools: Optional[List[str]] = None,
+    toolkit_factories: Optional[Mapping[str, ToolkitFactory]] = None,
 ) -> Agent:
     """Build an agent from its stored prompt and config.
 
@@ -517,6 +522,13 @@ def get_agent(
                 auth=False,
             )
 
+    # Further toolkits the caller offers, built from (user_id, fetch_token_func) if the tag enables them
+    toolkit_candidates = {
+        name: factory(user_id, fetch_token_func)
+        for name, factory in (toolkit_factories or {}).items()
+        if name in available_tools and fetch_token_func and user_id
+    }
+
     # Build base tools list conditionally based on available_tools tag
     base_tools_list: list = []
 
@@ -544,8 +556,14 @@ def get_agent(
     if extra_tools:
         base_tools_list.extend(extra_tools)
 
-    # Initialize toolkit selector if organizer_email and fetch_token_func are provided
-    if organizer_email and fetch_token_func and user_id:
+    # Initialize toolkit selector if organizer_email and fetch_token_func are provided,
+    # or if the caller supplied further toolkit candidates (built only with a user and fetcher).
+    # TODO: Calendar, Contacts, Drive and Email are still built by name above, and the
+    # organizer_email check belongs to Calendar alone. If they supplied candidates the same way,
+    # this condition would reduce to `if toolkit_candidates:`. Their factories would need the
+    # per-request organizer_email (Calendar) and tenant_id (Drive), so the caller would build
+    # them per request rather than list them in a module-level mapping like Tasks.
+    if (organizer_email and fetch_token_func and user_id) or toolkit_candidates:
         # Create the toolkit selector hook (will only select from non-None toolkits)
         # Pass base_tools_list so the pre-hook can preserve them
         pre_hooks = [
@@ -565,6 +583,7 @@ def get_agent(
                 email_google=email_google,
                 email_microsoft=email_microsoft,
                 email_no_auth=email_no_auth,
+                toolkit_candidates=toolkit_candidates,
             )
         ]
     else:
