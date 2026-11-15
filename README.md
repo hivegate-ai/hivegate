@@ -12,6 +12,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/commits/main)
 [![Discussions](https://img.shields.io/github/discussions/hivegate-ai/hivegate)](https://github.com/hivegate-ai/hivegate/discussions)
 [![Open Source Helpers](https://www.codetriage.com/hivegate-ai/hivegate/badges/users.svg)](https://www.codetriage.com/hivegate-ai/hivegate)
+[![Verified on FreeAPI](https://findfreeapi.com/api/badge/hivegate)](https://findfreeapi.com/en/service/hivegate)
 
 HiveGate is an open-source FastAPI service built on [Agno 3](https://github.com/agno-agi/agno). You write the agent, and HiveGate gives it what production needs:
 - per-user sessions
