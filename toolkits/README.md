@@ -17,6 +17,7 @@ toolkits/
 ├── contacts.py              # Contacts toolkit (Google, Microsoft)
 ├── email.py                 # Email toolkit (Gmail, Outlook)
 ├── drive.py                 # Drive toolkit (Google Drive, OneDrive)
+├── tasks.py                 # Tasks toolkit (Google Tasks, Microsoft To Do)
 └── API_REFERENCE.md         # Method specifications
 ```
 
@@ -51,6 +52,12 @@ toolkit = CalendarToolkit(
 - `schedule_meeting`: Create calendar events (requires confirmation)
 - `auth_required`: Prompt for authentication (when auth=False)
 - `error_card`: Display errors with retry options
+
+### TasksToolkit
+
+Task management for Google Tasks and Microsoft To Do. The toolkit lists task
+lists and tasks, and registers create, update, complete, and delete as tools
+that require confirmation. Chat and CLI registration will follow separately.
 
 ## Additional Agent Tools
 

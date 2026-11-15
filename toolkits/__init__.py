@@ -20,8 +20,8 @@ Drive Toolkits:
 Email Toolkits:
 - EmailToolkit: Multi-provider email management (Gmail, Outlook Mail)
 
-Planned Toolkits:
-- TaskManagementToolkit: Task creation and tracking
+Tasks Toolkits:
+- TasksToolkit: Multi-provider task management (Google Tasks, Microsoft To Do)
 
 Usage
 =====
@@ -90,6 +90,7 @@ from .calendar import CalendarToolkit
 from .contacts import ContactsToolkit
 from .drive import DriveToolkit
 from .email import EmailToolkit
+from .tasks import TasksToolkit
 from .token_cache import TokenCache
 
 # Create global shared token cache instance for all toolkits
@@ -101,6 +102,7 @@ __all__ = [
     "ContactsToolkit",
     "DriveToolkit",
     "EmailToolkit",
+    "TasksToolkit",
     "TokenCache",
     "token_cache",
 ]

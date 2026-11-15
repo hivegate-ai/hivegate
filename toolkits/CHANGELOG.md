@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `API_REFERENCE.md` with complete method specifications for all toolkits
+- `TasksToolkit` foundation for listing and managing Google Tasks and Microsoft To Do tasks.
 
 ### Removed
 - `ExpenseReimbursementToolkit` (moved out of toolkits package)
