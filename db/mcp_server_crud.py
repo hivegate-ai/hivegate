@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from api.services.logging import log_safe
 from api.services.token_security import get_token_encryption
 from db.db_models import MCPServerDB
+from supervisor.models import MCPServerConfig
 
 AUTH_NONE = "none"
 AUTH_STATIC_HEADERS = "static_headers"
@@ -101,9 +102,12 @@ def create_mcp_server(
         raise
 
 
-def get_mcp_server(db: Session, server_id: str) -> Optional[MCPServerDB]:
-    """Get an active server by id."""
-    return db.query(MCPServerDB).filter(MCPServerDB.id == server_id, MCPServerDB.is_active).first()
+def get_mcp_server(db: Session, server_id: str, lock: bool = False) -> Optional[MCPServerDB]:
+    """Get an active server by id. lock=True holds a row lock (FOR UPDATE) until commit."""
+    query = db.query(MCPServerDB).filter(MCPServerDB.id == server_id, MCPServerDB.is_active)
+    if lock:
+        query = query.with_for_update().populate_existing()
+    return query.first()
 
 
 def get_all_mcp_servers(db: Session, include_inactive: bool = False) -> List[MCPServerDB]:
@@ -171,6 +175,52 @@ def soft_delete_mcp_server(db: Session, server_id: str) -> bool:
         raise
     logging.info(f"Soft deleted MCP server {log_safe(server_id)}")
     return True
+
+
+class UnknownMCPServersError(Exception):
+    """Ids with no active registered server (never registered, or deleted)."""
+
+    def __init__(self, server_ids: List[str]):
+        super().__init__(", ".join(server_ids))
+        self.server_ids = server_ids
+
+
+def get_mcp_servers_by_ids(db: Session, server_ids: List[str], lock: bool = False) -> List[MCPServerDB]:
+    """The active servers for these ids, in the order given. Raises UnknownMCPServersError
+    naming every id that has none.
+
+    lock=True takes a shared row lock (FOR SHARE) until commit, which a delete's FOR UPDATE
+    waits for: attaching servers to an agent holds it across the agent write, so a delete
+    running at the same time either sees the new reference (409) or deletes first and the
+    attach sees the server gone (400). Without it both could pass their checks.
+    """
+    if not server_ids:
+        return []
+    query = db.query(MCPServerDB).filter(MCPServerDB.id.in_(server_ids), MCPServerDB.is_active)
+    if lock:
+        query = query.with_for_update(read=True).populate_existing()
+    found = {str(s.id): s for s in query.all()}
+    missing = [i for i in server_ids if i not in found]
+    if missing:
+        raise UnknownMCPServersError(missing)
+    return [found[i] for i in server_ids]
+
+
+def mcp_server_configs_for_chat(db: Session, server_ids: List[str]) -> List[MCPServerConfig]:
+    """Registered servers as the MCPServerConfig the chat path connects to, headers decrypted.
+
+    Raises UnknownMCPServersError, or TokenSecurityError when the headers cannot be decrypted.
+    """
+    return [
+        MCPServerConfig(
+            name=str(server.id),
+            type=str(server.transport),
+            url=str(server.url),
+            headers=get_mcp_server_headers(server),
+            description=server.description,  # type: ignore[arg-type]
+        )
+        for server in get_mcp_servers_by_ids(db, server_ids)
+    ]
 
 
 def get_mcp_server_header_names(server: MCPServerDB) -> List[str]:

@@ -488,5 +488,62 @@ class TestMcpChatRoute(unittest.TestCase):
         self.assertIn("stdio", cm.exception.detail)
 
 
+class TestRegisteredMcpServersOnChat(unittest.TestCase):
+    # Reuse the route fixture and helpers without re-running TestMcpChatRoute's tests.
+    setUp = TestMcpChatRoute.setUp
+    _mock_prompt = TestMcpChatRoute._mock_prompt
+    _mock_agent = TestMcpChatRoute._mock_agent
+    _body = TestMcpChatRoute._body
+    _agent_with_mcp_servers = TestMcpChatRoute._agent_with_mcp_servers
+
+    def _agent_with_ids(self, ids):
+        data = dict(self.agent_data)
+        data["config"] = json.dumps({"mcp_server_ids": ids})
+        return data
+
+    def _chat(self, agent_data, resolver):
+        captured: dict = {}
+        envp, storep, promptsp, infop = _patches()
+        with envp, storep, promptsp as mock_prompts, infop as mock_info:
+            mock_info.return_value = AgentInfoDB(**agent_data)
+            mock_prompts.get_prompt.return_value = self._mock_prompt()
+
+            def build(config):
+                captured["servers"] = list(config.worker_config.mcp_servers) if config and config.worker_config else []
+                return [_FakeMCP()]
+
+            with (
+                patch("api.routes.v2.agents.mcp_server_configs_for_chat", resolver),
+                patch("api.routes.v2.agents.build_mcp_toolkits", side_effect=build),
+                patch("api.routes.v2.agents.get_agent_impl", return_value=self._mock_agent()),
+            ):
+                resp = self.client.post("/v2/agents/mcp-agent/chat", json=self._body(stream=False))
+        return resp, captured
+
+    def test_registered_servers_are_connected(self):
+        from supervisor.models import MCPServerConfig
+
+        crm = MCPServerConfig(name="crm", type="streamable-http", url="https://crm/mcp", headers={"A": "b"})
+        resolver = MagicMock(return_value=[crm])
+        resp, captured = self._chat(self._agent_with_ids(["crm"]), resolver)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resolver.call_args.args[1], ["crm"])
+        self.assertEqual(captured["servers"], [crm])
+
+    def test_unknown_registered_server_is_400_before_connecting(self):
+        from db.mcp_server_crud import UnknownMCPServersError
+
+        resolver = MagicMock(side_effect=UnknownMCPServersError(["gone"]))
+        resp, captured = self._chat(self._agent_with_ids(["gone"]), resolver)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("gone", resp.json()["detail"])
+        self.assertNotIn("servers", captured)
+
+    def test_agent_without_ids_never_queries_the_registry(self):
+        resolver = MagicMock()
+        self._chat(self._agent_with_mcp_servers([{"name": "pf", "type": "http", "url": "https://pf/mcp"}]), resolver)
+        resolver.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

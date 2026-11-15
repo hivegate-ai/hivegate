@@ -21,7 +21,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.services.token_security import TokenEncryption, TokenSecurityError
-from db.db_models import MCPServerDB
+from db.db_models import AgentInfoDB, MCPServerDB
 from db.mcp_server_crud import (
     MCPServerExistsError,
     create_mcp_server,
@@ -43,11 +43,13 @@ class _RegistryTestBase(unittest.TestCase):
     def setUpClass(cls):  # type: ignore[override]
         cls.engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         MCPServerDB.__table__.create(bind=cls.engine, checkfirst=True)  # type: ignore[attr-defined]
+        AgentInfoDB.__table__.create(bind=cls.engine, checkfirst=True)  # type: ignore[attr-defined]
         cls.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=cls.engine)
 
     @classmethod
     def tearDownClass(cls):
         MCPServerDB.__table__.drop(bind=cls.engine, checkfirst=True)  # type: ignore[attr-defined]
+        AgentInfoDB.__table__.drop(bind=cls.engine, checkfirst=True)  # type: ignore[attr-defined]
 
     def setUp(self):
         self.encryption = TokenEncryption(Fernet.generate_key().decode())
@@ -56,6 +58,7 @@ class _RegistryTestBase(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.db = self.SessionLocal()
         self.db.query(MCPServerDB).delete()
+        self.db.query(AgentInfoDB).delete()
         self.db.commit()
 
     def tearDown(self):
