@@ -424,7 +424,9 @@ HiveGate is built in the open, and these people have contributed to it:
   use (stdio, sse) fail with a 400 naming the server, instead of answering with no tools (#206)
 - [@visveshkhanna](https://github.com/visveshkhanna) — inventoried all 141 tools of Neon's MCP
   server, which ones are safe in read-only mode and which should always need approval (#204),
-  and mapped the OAuth setup of Gamma's and Zite's hosted MCP servers (#202, #203)
+  mapped the OAuth setup of Gamma's and Zite's hosted MCP servers (#202, #203), and made the
+  knowledge embedder configurable with `KNOWLEDGE_EMBEDDER`, so knowledge works without a Google
+  key (#238)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
