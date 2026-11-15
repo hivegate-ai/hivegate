@@ -7,13 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrading
+- Run `hivegate migrate` (or apply `db/migrations/012_create_mcp_servers_table.sql`) to create
+  the `mcp_servers` table. Header values are encrypted with `SECRET_TOKEN_ENC_KEY`, the key user
+  tokens already use
+- Validation errors (HTTP 422) no longer include `input`, on every route. FastAPI's default put
+  the rejected value there, and for a missing field the whole request body, so a typo next to an
+  access token or an MCP header sent the secret back in the error. `loc`, `msg` and `type` are
+  unchanged. A client that read `input` out of a 422 needs to change
+
 ### Fixed
 - Gemini works again with google-genai 3.0. That release changed the client's default API
   version from `v1beta` to `v1`, where gemini-2.5 models refuse function calling (400) and
   preview models, including the default `gemini-3-flash-preview`, are not found (404). Every
   Gemini client HiveGate builds now pins `v1beta`: chat models, teams, the knowledge embedder,
-  model listing and file uploads. A fresh `pip install hivegate-ai==0.4.0` pulls google-genai
+  model listing and file uploads. Vertex AI (`GOOGLE_GENAI_USE_VERTEXAI=true`) keeps
+  its own default, `v1beta1`. A fresh `pip install hivegate-ai==0.4.0` pulls google-genai
   3.0 and is affected. The 0.4.0 Docker image pins 2.34 and is not.
+- A chat agent's MCP server with transport `HTTP` (any capitalisation other than lowercase)
+  passed the chat check and was then dropped without its tools. Both now share one check
+- An MCP server URL with an invalid port (`:99999`, `:abc`) is refused by the chat check instead
+  of failing when chat connects
+
+### Added
+- MCP server registry: `/v2/mcp-servers` registers an HTTP MCP server once (id, URL, transport,
+  optional static headers). Header values are encrypted at rest and responses list only their
+  names. Agents cannot reference these servers yet; that comes next (#91)
 
 ## [0.4.0] - 2026-11-11
 

@@ -9,7 +9,6 @@ import zlib
 from contextlib import AsyncExitStack, aclosing
 from threading import Lock
 from typing import Any, AsyncGenerator, Dict, List, Optional, cast
-from urllib.parse import urlsplit
 
 from agno.agent import Agent
 from agno.db.base import SessionType
@@ -27,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
 from agents.hitl import requirements_for
+from agents.mcp_validation import SUPPORTED_MCP_TRANSPORTS, mcp_url_problem, normalize_mcp_transport
 from agents.agent import build_mcp_toolkits, ensure_mcp_ready, get_agent_db
 from agents.agent import get_agent as get_agent_impl
 from agents.agent import slug_to_table_name
@@ -911,10 +911,6 @@ async def get_agent(
     return agent, prompt_data, cache_key, agent_config
 
 
-SUPPORTED_MCP_TRANSPORTS = ("http", "streamable-http")
-VALID_HTTP_SCHEMES = ("http", "https")
-
-
 def validate_mcp_servers_for_chat(agent_config: AgentConfig | None) -> None:
     """Validate that declared MCP servers use supported transports for chat agents.
 
@@ -939,8 +935,7 @@ def validate_mcp_servers_for_chat(agent_config: AgentConfig | None) -> None:
             raw_transport = getattr(server, "type", None) or "stdio"
             raw_url = getattr(server, "url", None)
 
-        transport = str(raw_transport).strip().lower()
-        if transport not in SUPPORTED_MCP_TRANSPORTS:
+        if normalize_mcp_transport(raw_transport) is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
@@ -949,7 +944,8 @@ def validate_mcp_servers_for_chat(agent_config: AgentConfig | None) -> None:
                 ),
             )
 
-        if not raw_url or not str(raw_url).strip():
+        url_problem = mcp_url_problem(raw_url)
+        if url_problem == "missing":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
@@ -960,12 +956,7 @@ def validate_mcp_servers_for_chat(agent_config: AgentConfig | None) -> None:
             )
 
         url_str = str(raw_url).strip()
-        try:
-            parsed = urlsplit(url_str)
-        except ValueError:
-            parsed = None
-
-        if parsed is None or parsed.scheme.lower() not in VALID_HTTP_SCHEMES or not parsed.netloc:
+        if url_problem is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(

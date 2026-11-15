@@ -18,6 +18,7 @@ from agno.tools.brightdata import BrightDataTools
 from agno.tools.user_control_flow import UserControlFlowTools
 
 from agents import DEFAULT_MODEL
+from agents.mcp_validation import normalize_mcp_transport
 from agents.model_factory import create_model
 from agents.toolkit_selector import create_datetime_resolver_tool, create_multi_toolkit_selector
 from api.services.knowledge_service import get_knowledge_service
@@ -197,7 +198,7 @@ def build_mcp_toolkits(config: Optional[AgentConfig]) -> list:
         transport = getattr(server, "type", "stdio")
         server_name = getattr(server, "name", "unknown")
 
-        if transport not in ("http", "streamable-http"):
+        if normalize_mcp_transport(transport) is None:
             logger.warning(
                 "Skipping MCP server '%s': unsupported transport '%s'",
                 server_name,
