@@ -172,7 +172,8 @@ Initial open source release.
 - Input validation with Pydantic models
 - SQL injection prevention via SQLAlchemy ORM
 
-[Unreleased]: https://github.com/hivegate-ai/hivegate/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/hivegate-ai/hivegate/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/hivegate-ai/hivegate/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/hivegate-ai/hivegate/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/hivegate-ai/hivegate/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/hivegate-ai/hivegate/releases/tag/v0.3.0
