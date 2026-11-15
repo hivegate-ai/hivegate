@@ -16,6 +16,11 @@ from api.services.token_security import TokenSecurityError
 from db.user_token_crud import get_decrypted_token_data, get_user_token, is_token_expired, update_user_token_data
 
 
+def _log_safe(value: object) -> str:
+    """Strip CR/LF so request-derived values (user ids, integration keys) can't forge log lines."""
+    return str(value).replace("\r", "").replace("\n", "")
+
+
 class TokenRefreshError(Exception):
     """Exception raised for token refresh operations."""
 
@@ -256,7 +261,9 @@ class OAuth2TokenRefresher:
 
             if response.status_code != 200:
                 error_msg = f"Token refresh failed with status {response.status_code}"
-                logging.error("%s for user %s, integration %s", error_msg, user_id, integration_key)
+                logging.error(
+                    "%s for user %s, integration %s", error_msg, _log_safe(user_id), _log_safe(integration_key)
+                )
                 return False, error_msg
 
             # Parse response
