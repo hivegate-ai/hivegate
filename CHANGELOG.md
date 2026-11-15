@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged. A client that read `input` out of a 422 needs to change
 
 ### Fixed
+- Chat agents now get agno's generated system prompt after their stored prompt: the current
+  date and time in the agent's timezone, the list of attached skills, memory guidance, toolkit
+  and knowledge-search instructions, and the markdown instruction. The stored prompt used to be
+  passed as agno's `system_message`, which agno sends as-is, so all of that was dropped and
+  `add_datetime_to_context` did nothing. `{var}` placeholders in stored prompts still resolve.
+  A stored prompt that expected to be the whole system message will now have that context after
+  it (#232, @visveshkhanna)
 - A chat agent's MCP server with transport `HTTP` (any capitalisation other than lowercase)
   passed the chat check and was then dropped without its tools. Both now share one check
 - An MCP server URL with an invalid port (`:99999`, `:abc`) is refused by the chat check instead

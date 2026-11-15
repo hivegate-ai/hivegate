@@ -543,6 +543,13 @@ def get_agent(
         name=agent_name,
         num_history_runs=config.num_history_runs,
         pre_hooks=pre_hooks,
+        # The stored prompt goes in as instructions, not system_message: agno returns a
+        # system_message as-is and never builds its own, which dropped the current date,
+        # the skills list, memory guidance and toolkit instructions (#232). Not
+        # description either: a team leader lists each member's description, so the whole
+        # prompt would land in the leader's system message. `{var}` substitution still
+        # applies to the built message.
+        instructions=system_prompt_template,
         read_chat_history=config.enable_history,
         reasoning_model=reasoning_model,
         search_knowledge=True,
@@ -550,7 +557,6 @@ def get_agent(
         session_id=session_id,
         store_history_messages=True,
         stream_events=True,
-        system_message=system_prompt_template,
         tools=tools_list,
         user_id=user_id,
         timezone_identifier=timezone,
