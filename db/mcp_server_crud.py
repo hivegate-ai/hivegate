@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from api.services.logging import log_safe
 from api.services.token_security import get_token_encryption
 from db.db_models import MCPServerDB
 
@@ -89,14 +90,14 @@ def create_mcp_server(
 
         db.commit()
         db.refresh(server)
-        logging.info(f"Saved MCP server {server_id}")
+        logging.info(f"Saved MCP server {log_safe(server_id)}")
         return server
     except MCPServerExistsError:
         db.rollback()  # release the row lock
         raise
     except Exception as e:
         db.rollback()
-        logging.error(f"Error creating MCP server {server_id}: {e}")
+        logging.error(f"Error creating MCP server {log_safe(server_id)}: {log_safe(e)}")
         raise
 
 
@@ -143,11 +144,11 @@ def update_mcp_server(
             _apply_headers(server, headers)
         db.commit()
         db.refresh(server)
-        logging.info(f"Updated MCP server {server_id}")
+        logging.info(f"Updated MCP server {log_safe(server_id)}")
         return server
     except Exception as e:
         db.rollback()
-        logging.error(f"Error updating MCP server {server_id}: {e}")
+        logging.error(f"Error updating MCP server {log_safe(server_id)}: {log_safe(e)}")
         raise
 
 
@@ -166,9 +167,9 @@ def soft_delete_mcp_server(db: Session, server_id: str) -> bool:
         db.commit()
     except Exception as e:
         db.rollback()
-        logging.error(f"Error deleting MCP server {server_id}: {e}")
+        logging.error(f"Error deleting MCP server {log_safe(server_id)}: {log_safe(e)}")
         raise
-    logging.info(f"Soft deleted MCP server {server_id}")
+    logging.info(f"Soft deleted MCP server {log_safe(server_id)}")
     return True
 
 

@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from agents.mcp_validation import SUPPORTED_MCP_TRANSPORTS, mcp_url_problem, normalize_mcp_transport
+from api.services.logging import log_safe
 from api.services.token_security import TokenSecurityError
 from db.mcp_server_crud import (
     UNSET,
@@ -205,7 +206,7 @@ async def create_mcp_server_v2(body: MCPServerCreate, db: Session = Depends(get_
         logging.exception("Cannot encrypt MCP server headers")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ENCRYPTION_NOT_CONFIGURED)
     except Exception as e:
-        logging.exception(f"Error creating MCP server {body.id}: {e}")
+        logging.exception(f"Error creating MCP server {log_safe(body.id)}: {log_safe(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create MCP server {body.id}"
         )
@@ -243,7 +244,7 @@ async def update_mcp_server_v2(server_id: str, body: MCPServerUpdate, db: Sessio
         logging.exception("Cannot encrypt MCP server headers")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ENCRYPTION_NOT_CONFIGURED)
     except Exception as e:
-        logging.exception(f"Error updating MCP server {server_id}: {e}")
+        logging.exception(f"Error updating MCP server {log_safe(server_id)}: {log_safe(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update MCP server {server_id}"
         )
@@ -259,7 +260,7 @@ async def delete_mcp_server_v2(server_id: str, db: Session = Depends(get_db)):
     try:
         deleted = soft_delete_mcp_server(db, server_id)
     except Exception as e:
-        logging.exception(f"Error deleting MCP server {server_id}: {e}")
+        logging.exception(f"Error deleting MCP server {log_safe(server_id)}: {log_safe(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete MCP server {server_id}"
         )

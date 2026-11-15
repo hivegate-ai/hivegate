@@ -32,3 +32,9 @@ def configure_logging() -> None:
     # Fallback: Initialize observability if not already done
     observability.initialize(ObservabilitySettings())
     logging.info("Logging configured via observability module (fallback)")
+
+
+def log_safe(value: object) -> str:
+    """Strip CR/LF so a request-derived value (an id from the URL, an exception quoting it)
+    cannot forge log lines."""
+    return str(value).replace("\r", "").replace("\n", "")
