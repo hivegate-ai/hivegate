@@ -1,12 +1,36 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from api.services import token_refresh
 from api.services.token_refresh import OAuth2TokenRefresher, get_token_refresher, get_user_tokens_for_agent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("provider", "status_code"), [("google", 400), ("microsoft", 401), ("github", 503)])
+async def test_provider_rejection_omits_response_body(monkeypatch, caplog, provider, status_code):
+    token = SimpleNamespace(provider=provider, token_type="oauth2")
+    monkeypatch.setattr(token_refresh, "get_user_token", lambda *_: token)
+    monkeypatch.setattr(token_refresh, "get_decrypted_token_data", lambda _: {"refresh_token": "test-refresh"})
+    provider_detail = "synthetic provider response body"
+    response = httpx.Response(
+        status_code, text=provider_detail, request=httpx.Request("POST", "https://example.invalid/token")
+    )
+    monkeypatch.setattr(httpx.AsyncClient, "post", AsyncMock(return_value=response))
+
+    success, error = await OAuth2TokenRefresher().refresh_oauth2_token(
+        MagicMock(), "test-user", f"{provider}_test", force_refresh=True
+    )
+
+    assert (success, error) == (False, f"Token refresh failed with status {status_code}")
+    assert f"{error} for user test-user, integration {provider}_test" in caplog.messages
+    assert provider_detail not in caplog.text
 
 
 class TestOAuth2TokenRefresher(unittest.TestCase):

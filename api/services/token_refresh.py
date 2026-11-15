@@ -246,14 +246,17 @@ class OAuth2TokenRefresher:
                     user_id=user_id,
                     integration_key=integration_key,
                 )
+            except httpx.HTTPStatusError as e:
+                # The request helper raises for some HTTP statuses. Handle them with returned rejections.
+                response = e.response
             except (httpx.HTTPError, RetryError) as e:
                 error_msg = f"Token refresh failed after retries for user {user_id}, integration {integration_key}: {e}"
                 logging.error(error_msg)
                 return False, error_msg
 
             if response.status_code != 200:
-                error_msg = f"Token refresh failed with status {response.status_code}: {response.text}"
-                logging.error(error_msg)
+                error_msg = f"Token refresh failed with status {response.status_code}"
+                logging.error("%s for user %s, integration %s", error_msg, user_id, integration_key)
                 return False, error_msg
 
             # Parse response
