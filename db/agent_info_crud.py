@@ -8,6 +8,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from api.services.logging import log_safe
 from db.db_models import AgentInfoDB
 from supervisor.models import WorkerConfig
 
@@ -205,7 +206,7 @@ def update_agent_info(
     db.commit()
     db.refresh(agent_info)
 
-    logging.info(f"Updated AgentInfo for {agent_id}")
+    logging.info(f"Updated AgentInfo for {log_safe(agent_id)}")
     return agent_info
 
 
