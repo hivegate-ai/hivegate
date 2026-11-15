@@ -17,13 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged. A client that read `input` out of a 422 needs to change
 
 ### Fixed
-- Gemini works again with google-genai 3.0. That release changed the client's default API
-  version from `v1beta` to `v1`, where gemini-2.5 models refuse function calling (400) and
-  preview models, including the default `gemini-3-flash-preview`, are not found (404). Every
-  Gemini client HiveGate builds now pins `v1beta`: chat models, teams, the knowledge embedder,
-  model listing and file uploads. Vertex AI (`GOOGLE_GENAI_USE_VERTEXAI=true`) keeps
-  its own default, `v1beta1`. A fresh `pip install hivegate-ai==0.4.0` pulls google-genai
-  3.0 and is affected. The 0.4.0 Docker image pins 2.34 and is not.
 - A chat agent's MCP server with transport `HTTP` (any capitalisation other than lowercase)
   passed the chat check and was then dropped without its tools. Both now share one check
 - An MCP server URL with an invalid port (`:99999`, `:abc`) is refused by the chat check instead
@@ -58,6 +51,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not fail; `tests/test_knowledge_service.py` covers what it meant to. `test_reproduce_issue.py`
   needed a live server; the race it reproduced is now a unit test of the duplicate-key retry in
   `create_user_token`
+
+## [0.4.1] - 2026-11-15
+
+### Fixed
+- Gemini works again with google-genai 3.0, which `pip install hivegate-ai==0.4.0` now
+  resolves to. That release changed the client's default API version from `v1beta` to `v1`,
+  where gemini-2.5 models refuse function calling (400) and preview models, including the
+  default `gemini-3-flash-preview`, are not found (404). Every Gemini client HiveGate builds
+  now pins `v1beta`: chat models, teams, the knowledge embedder, model listing and file
+  uploads. Vertex AI (`GOOGLE_GENAI_USE_VERTEXAI=true`) keeps its own default, `v1beta1`.
+  The 0.4.0 Docker image pins google-genai 2.34 and was not affected (#234)
 
 ## [0.4.0] - 2026-11-11
 
@@ -213,7 +217,8 @@ Initial open source release.
 - Input validation with Pydantic models
 - SQL injection prevention via SQLAlchemy ORM
 
-[Unreleased]: https://github.com/hivegate-ai/hivegate/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/hivegate-ai/hivegate/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/hivegate-ai/hivegate/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/hivegate-ai/hivegate/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/hivegate-ai/hivegate/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/hivegate-ai/hivegate/releases/tag/v0.3.0
