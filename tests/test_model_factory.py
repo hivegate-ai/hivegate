@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from agents import Model
+from agents.gemini_api import gemini_client_params
 from agents.model_factory import PROVIDER_RETRY, create_model
 
 
@@ -13,7 +14,9 @@ class TestCreateModel(unittest.TestCase):
         mock_gemini_class.return_value = MagicMock()
         result = create_model(Model.gemini_2_5_pro, gemini_api_key="test-key")
 
-        mock_gemini_class.assert_called_once_with(id="gemini-2.5-pro", api_key="test-key", **PROVIDER_RETRY)
+        mock_gemini_class.assert_called_once_with(
+            id="gemini-2.5-pro", api_key="test-key", client_params=gemini_client_params(), **PROVIDER_RETRY
+        )
         self.assertEqual(result, mock_gemini_class.return_value)
 
     @patch("agents.model_factory.GuardedGemini")
@@ -186,7 +189,9 @@ class TestCreateModel(unittest.TestCase):
         mock_gemini_class.return_value = MagicMock()
         create_model("gemini-2.5-pro", gemini_api_key="test-key")
 
-        mock_gemini_class.assert_called_once_with(id="gemini-2.5-pro", api_key="test-key", **PROVIDER_RETRY)
+        mock_gemini_class.assert_called_once_with(
+            id="gemini-2.5-pro", api_key="test-key", client_params=gemini_client_params(), **PROVIDER_RETRY
+        )
 
     def test_invalid_model_string_raises(self):
         with self.assertRaises(ValueError):

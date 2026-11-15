@@ -2,6 +2,7 @@ import copy
 from typing import Any, Optional, Union
 
 from agents import Model, ModelProvider, get_provider
+from agents.gemini_api import gemini_client_params
 from agents.model_resolver import resolve_model_id
 from agents.openai_responses import ReasoningAwareOpenAIResponses
 from agents.provider_models import GuardedDeepSeek, GuardedGemini, GuardedOpenAILike, GuardedXAI
@@ -109,7 +110,7 @@ def create_model(
         if not gemini_api_key:
             raise ProviderNotConfiguredError("Gemini API key is required for Gemini models")
 
-        kwargs = {"id": model_id, "api_key": gemini_api_key}
+        kwargs = {"id": model_id, "api_key": gemini_api_key, "client_params": gemini_client_params()}
         if temperature is not None:
             kwargs["temperature"] = temperature
         if max_tokens is not None:
