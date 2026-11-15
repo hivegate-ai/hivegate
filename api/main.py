@@ -141,6 +141,7 @@ def create_app() -> FastAPI:
     from api.routes.health import health_router
     from api.routes.usage import usage_router
     from api.settings import api_settings
+    from api.validation_errors import install_validation_error_handler
 
     logging.info("Creating FastAPI app with lifespan")
     app: FastAPI = FastAPI(
@@ -152,6 +153,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     logging.info("FastAPI app created with lifespan")
+    install_validation_error_handler(app)
 
     # Setup OpenTelemetry auto-instrumentation for OTLP backend
     try:

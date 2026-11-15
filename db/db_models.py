@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from sqlalchemy import ARRAY, Boolean, Column, DateTime, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import ARRAY, Boolean, Column, DateTime, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase
 
@@ -255,6 +255,30 @@ class ExecutionEngineDB(Base):
     is_default = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+
+class MCPServerDB(Base):
+    """A registered MCP server that agents can reference by id (#91).
+
+    Header values are encrypted at rest (same key as user tokens); header_names is kept in
+    the clear so reads can say which headers are set without decrypting them.
+    """
+
+    __tablename__ = "mcp_servers"
+
+    id = Column(String(63), primary_key=True, index=True)  # slug, also the tool-name prefix (#95)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    url = Column(Text, nullable=False)
+    transport = Column(String(32), nullable=False, default="streamable-http")
+    auth_type = Column(String(32), nullable=False, default="none")  # none, static_headers
+    encrypted_headers = Column(Text, nullable=True)
+    header_names = Column(Text, nullable=True)  # JSON list of header names
+    tenant_id = Column(String(255), nullable=True, index=True)  # NULL = shared; scoping is v0.9.0 (#226)
+    # Database clock, the same one the updated_at trigger uses, so the two never disagree.
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
 
 

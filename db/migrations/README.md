@@ -41,6 +41,7 @@ The setup script creates the following database objects:
 | `user_tokens` | Encrypted OAuth tokens and API keys |
 | `token_usage` | API usage tracking |
 | `api_keys` | API key authentication (hashed keys, scopes) |
+| `mcp_servers` | Registered MCP servers (encrypted header values) |
 
 ### Tables (prompts schema)
 | Table | Description |
