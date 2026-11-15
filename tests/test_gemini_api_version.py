@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 from agno.knowledge.embedder.google import GeminiEmbedder
+from google import genai
 
-from agents.gemini_api import GEMINI_API_VERSION, gemini_client_params
+from agents.gemini_api import GEMINI_API_VERSION, gemini_client_params, gemini_http_options
 from agents.model_factory import create_model
 
 REPO = Path(__file__).resolve().parent.parent
@@ -39,6 +40,16 @@ def test_embedder_client_uses_v1beta():
     embedder = GeminiEmbedder(api_key="test-key", client_params=gemini_client_params())
 
     assert _api_version(embedder.client) == "v1beta"
+
+
+def test_vertex_ai_keeps_its_own_default(monkeypatch):
+    # Vertex has v1 and v1beta1, no v1beta. Forcing ours would break every call.
+    monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
+
+    assert gemini_client_params() == {"http_options": {}}
+    # Express mode (an API key) builds a Vertex client without Google Cloud credentials.
+    client = genai.Client(vertexai=True, api_key="test-key", http_options=gemini_http_options())
+    assert _api_version(client) == "v1beta1"
 
 
 def test_client_params_are_fresh_per_call():
