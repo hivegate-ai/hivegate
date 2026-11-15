@@ -16,6 +16,7 @@ from db.user_token_crud import (
     get_user_token,
     get_user_tokens,
 )
+from toolkits import token_cache
 
 tokens_router = APIRouter(prefix="/users/{user_id}/tokens", tags=["V2 Token Management"])
 
@@ -190,6 +191,8 @@ async def store_user_token(user_id: str, body: StoreTokenRequest, db: Session = 
             scopes=body.scopes,
             expires_at=expires_at,
         )
+        # The save has committed. Drop any cached access token from the previous grant.
+        token_cache.invalidate(body.integration_key, user_id)
 
         response = StoreTokenResponse(
             integration_key=body.integration_key,
