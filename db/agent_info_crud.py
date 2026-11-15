@@ -5,9 +5,10 @@ import json
 import logging
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from api.services.logging import log_safe
 from db.db_models import AgentInfoDB
 from supervisor.models import WorkerConfig
 
@@ -29,6 +30,10 @@ class AgentConfig(BaseModel):
 
     # Supervisor worker settings (optional — only for agents used as supervisor workers)
     worker_config: Optional[WorkerConfig] = None
+
+    # Registered MCP servers (/v2/mcp-servers) the agent's chat connects to, by id (#91).
+    # Chat only: supervisor and container workers keep using worker_config.mcp_servers.
+    mcp_server_ids: List[str] = Field(default_factory=list)
 
 
 def create_agent_info(
@@ -201,7 +206,7 @@ def update_agent_info(
     db.commit()
     db.refresh(agent_info)
 
-    logging.info(f"Updated AgentInfo for {agent_id}")
+    logging.info(f"Updated AgentInfo for {log_safe(agent_id)}")
     return agent_info
 
 
@@ -247,6 +252,15 @@ def get_agent_tags(agent_info: AgentInfoDB) -> List[str]:
         return []
 
 
+def parse_agent_config(agent_info: AgentInfoDB) -> AgentConfig:
+    """The stored config, or defaults when none is stored. Raises when it is stored but does
+    not validate; use this rather than get_agent_config before writing the config back, or
+    the defaults overwrite it."""
+    if not agent_info.config:
+        return AgentConfig()
+    return AgentConfig.model_validate_json(agent_info.config)  # type: ignore[arg-type]
+
+
 def get_agent_config(agent_info: AgentInfoDB) -> AgentConfig:
     """
     Parse config from AgentInfoDB record, returning defaults if not set.
@@ -257,14 +271,27 @@ def get_agent_config(agent_info: AgentInfoDB) -> AgentConfig:
     Returns:
         AgentConfig instance (defaults if no config stored)
     """
-    if not agent_info.config:
-        return AgentConfig()  # Return defaults
-
     try:
-        return AgentConfig.model_validate_json(agent_info.config)  # type: ignore[arg-type]
+        return parse_agent_config(agent_info)
     except Exception:
         logging.warning(f"Failed to parse config for agent {agent_info.id}, using defaults")
         return AgentConfig()
+
+
+def _referenced_mcp_server_ids(agent_info: AgentInfoDB) -> List[str]:
+    """mcp_server_ids read from the raw config JSON, so a config that fails AgentConfig
+    validation for an unrelated field still counts as referencing its servers."""
+    try:
+        data = json.loads(agent_info.config or "{}")  # type: ignore[arg-type]
+    except (json.JSONDecodeError, TypeError):
+        return []
+    ids = data.get("mcp_server_ids") if isinstance(data, dict) else None
+    return [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else []
+
+
+def get_agents_using_mcp_server(db: Session, server_id: str) -> List[str]:
+    """Ids of active agents whose config references this registered MCP server."""
+    return sorted(str(agent.id) for agent in get_all_agent_info(db) if server_id in _referenced_mcp_server_ids(agent))
 
 
 def agent_info_exists(db: Session, agent_id: str) -> bool:

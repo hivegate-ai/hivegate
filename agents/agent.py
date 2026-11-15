@@ -3,7 +3,8 @@ import re
 import time
 import logging
 from datetime import datetime
-from typing import Callable, List, Optional
+from contextlib import AsyncExitStack, asynccontextmanager
+from typing import AsyncIterator, Callable, List, Optional
 
 from agno.agent import Agent
 from functools import lru_cache
@@ -246,6 +247,21 @@ def ensure_mcp_ready(toolkits: list) -> None:
         if not getattr(tk, "_initialized", False) or not getattr(tk, "functions", None):
             url = getattr(getattr(tk, "server_params", None), "url", "mcp-server")
             raise RuntimeError(f"MCP tool server not ready (no tools loaded): {url}")
+
+
+@asynccontextmanager
+async def connect_mcp_toolkits(toolkits: list) -> AsyncIterator[list]:
+    """Connect each MCP toolkit and check it loaded tools; disconnect them all on exit.
+
+    The one place a request opens MCP sessions (chat, streaming and not; /chat/commit can
+    reuse it for #93). Raises whatever the connect raised, or RuntimeError from
+    ensure_mcp_ready; callers turn that into their own error shape.
+    """
+    async with AsyncExitStack() as stack:
+        for toolkit in toolkits:
+            await stack.enter_async_context(toolkit)
+        ensure_mcp_ready(toolkits)
+        yield toolkits
 
 
 @lru_cache(maxsize=None)
