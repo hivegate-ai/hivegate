@@ -17,7 +17,8 @@ toolkits/
 ├── calendar.py              # CalendarToolkit (Google/Microsoft Calendar)
 ├── email.py                 # EmailToolkit (Gmail/Outlook Mail)
 ├── contacts.py              # ContactsToolkit (Google/Microsoft Contacts)
-└── drive.py                 # DriveToolkit (Google Drive/OneDrive)
+├── drive.py                 # DriveToolkit (Google Drive/OneDrive)
+└── tasks.py                 # TasksToolkit (Google Tasks/Microsoft To Do)
 ```
 
 ## Module Descriptions
@@ -55,11 +56,16 @@ Multi-provider file management:
 - Upload, download, list, and manage files
 - Knowledge base integration for file indexing
 
+### `tasks.py`
+Task management for Google Tasks and Microsoft To Do:
+- List task lists and tasks
+- Create, update, complete, and delete tasks with confirmation metadata
+
 ## Import Examples
 
 ```python
 # Import all toolkits
-from toolkits import CalendarToolkit, EmailToolkit, ContactsToolkit, DriveToolkit
+from toolkits import CalendarToolkit, EmailToolkit, ContactsToolkit, DriveToolkit, TasksToolkit
 
 # Import specific toolkit
 from toolkits.calendar import CalendarToolkit

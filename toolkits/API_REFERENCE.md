@@ -644,6 +644,25 @@ def get_file_info(
 }
 ```
 
+## TasksToolkit Methods
+
+Construct `TasksToolkit` in Python with a `user_id`, `service_name` (`google_tasks` or `microsoft_todo`), and a token fetcher. The confirmation column describes the Agno registration. Python callers control when to invoke write methods. Native chat and CLI wiring is a separate step.
+
+| Tool | Arguments | Result | Confirmation |
+|------|-----------|--------|--------------|
+| `list_task_lists` | None | `{"lists": [...]}` | No |
+| `list_tasks` | `list_id` | `{"tasks": [...]}` | No |
+| `create_task` | `list_id`, `content` | Created task | Yes |
+| `update_task` | `list_id`, `task_id`, `changes` | Updated task | Yes |
+| `complete_task` | `list_id`, `task_id` | Completed task | Yes |
+| `delete_task` | `list_id`, `task_id` | `{"deleted": true, "list_id": "...", "task_id": "..."}` | Yes |
+
+Use the list and task IDs returned by the provider. Lists include open and completed tasks. Task results include `id`, `list_id`, `title`, `notes`, `status` (`open` or `completed`), `due` (a calendar date), and `completed_at` (an ISO timestamp when available).
+
+For creation, supply a title and optional notes and due date, for example `{"content":{"title":"Send report","due":"2026-11-20"}}` alongside `list_id`. For updates, send only the fields you want to change. `{"changes":{"title":"Send final report"}}` preserves notes and due date. `{"changes":{"notes":null,"due":null}}` clears both. Supply due dates as `YYYY-MM-DD`.
+
+If the connection is missing or the provider rejects its credential, the toolkit returns a `tasks-auth-required` card. Its `context.service_name` identifies the rejected connection on reconnect, and `context.available_services` lists connection choices. A permission error may mean the connection only has read access. An interrupted write may have reached the provider, so check the task list before retrying.
+
 ## Common Error Responses (All Toolkits)
 
 **Authentication Required**:
