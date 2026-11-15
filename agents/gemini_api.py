@@ -10,10 +10,12 @@ with google-genai 2.x.
 
 from typing import Any, Dict
 
+from google.genai.types import HttpOptionsDict
+
 GEMINI_API_VERSION = "v1beta"
 
 
-def gemini_http_options() -> Dict[str, Any]:
+def gemini_http_options() -> HttpOptionsDict:
     """`http_options` for `google.genai.Client(...)`."""
     return {"api_version": GEMINI_API_VERSION}
 
