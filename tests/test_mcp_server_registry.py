@@ -16,12 +16,14 @@ os.environ["TESTING"] = "true"
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.services.token_security import TokenEncryption, TokenSecurityError
 from db.db_models import MCPServerDB
 from db.mcp_server_crud import (
+    MCPServerExistsError,
     create_mcp_server,
     get_all_mcp_servers,
     get_mcp_server,
@@ -149,6 +151,23 @@ class TestMCPServerCRUD(_RegistryTestBase):
         server = create_mcp_server(self.db, "crm", "CRM", "https://crm.example.com/mcp")
         self.assertGreater(server.created_at, datetime.datetime(2021, 1, 1))
 
+    def test_create_over_an_active_row_raises(self):
+        create_mcp_server(self.db, "crm", "CRM", "https://crm.example.com/mcp", headers={"A": "keep"})
+        with self.assertRaises(MCPServerExistsError):
+            create_mcp_server(self.db, "crm", "Other", "https://other.example.com/mcp")
+        server = get_mcp_server(self.db, "crm")
+        self.assertEqual(server.url, "https://crm.example.com/mcp")  # untouched
+        self.assertEqual(get_mcp_server_headers(server), {"A": "keep"})
+
+    def test_failed_delete_rolls_back(self):
+        create_mcp_server(self.db, "crm", "CRM", "https://crm.example.com/mcp", headers={"A": "b"})
+        with patch.object(self.db, "commit", side_effect=RuntimeError("db down")):
+            with self.assertRaises(RuntimeError):
+                soft_delete_mcp_server(self.db, "crm")
+        server = get_mcp_server(self.db, "crm")
+        self.assertIsNotNone(server)  # session usable, row still active
+        self.assertEqual(get_mcp_server_headers(server), {"A": "b"})
+
     def test_description_unset_keeps_none_clears(self):
         create_mcp_server(self.db, "crm", "CRM", "https://crm.example.com/mcp", description="old")
         self.assertEqual(update_mcp_server(self.db, "crm", name="x").description, "old")
@@ -231,6 +250,8 @@ class TestMCPServerRoutes(_RegistryTestBase):
             {"headers": {"Authorization": "Bearer x "}},
             {"headers": {"Authorization": " Bearer x"}},
             {"headers": {"Authorization": "a\tb"}},
+            {"headers": {"Authorization": "secret\n"}},
+            {"headers": {"X-Key\n": "v"}},
             {"headers": {"Mcp-Session-Id": "pinned"}},
             {"headers": {"content-length": "0"}},
             {"headers": {"Host": "evil.example.com"}},
@@ -238,6 +259,8 @@ class TestMCPServerRoutes(_RegistryTestBase):
             {"url": "https://user:pass@crm.example.com/mcp"},
             {"url": "https://token@crm.example.com/mcp"},
             {"url": "https:///mcp"},
+            {"url": "https://crm.example.com:99999/mcp"},
+            {"url": "https://crm.example.com:abc/mcp"},
             {"name": ""},
         ]
         for overrides in cases:
@@ -255,11 +278,29 @@ class TestMCPServerRoutes(_RegistryTestBase):
         self.assertEqual(response.status_code, 201, response.text)
 
     def test_concurrent_duplicate_is_409_not_500(self):
-        self.assertEqual(self._create().status_code, 201)
-        # Simulate losing the race: the existence check misses the row the other request wrote.
-        with patch("api.routes.v2.mcp_servers.get_mcp_server", return_value=None):
+        # Losing the insert race to a concurrent create of the same new id.
+        error = IntegrityError("INSERT", {}, Exception("duplicate key"))
+        with patch("api.routes.v2.mcp_servers.create_mcp_server", side_effect=error):
             response = self._create()
         self.assertEqual(response.status_code, 409, response.text)
+
+    def test_422s_never_echo_the_body(self):
+        secret = {"Authorization": "Bearer sk-SECRET"}
+        responses = {
+            "missing name": self.client.post(
+                "/v2/mcp-servers", json={"id": "crm", "url": "https://crm.example.com/mcp", "headers": secret}
+            ),
+            "bad url": self._create(url="ftp://x", headers=secret),
+            "bad header value": self._create(headers={"Authorization": 5, "X-Other": "sk-SECRET"}),
+        }
+        self._create()
+        responses["update null"] = self.client.put("/v2/mcp-servers/crm", json={"name": None, "headers": secret})
+        for label, response in responses.items():
+            with self.subTest(label):
+                self.assertEqual(response.status_code, 422)
+                self.assertNotIn("sk-SECRET", response.text)
+                self.assertTrue(all("input" not in error for error in response.json()["detail"]))
+                self.assertTrue(all("loc" in error and "msg" in error for error in response.json()["detail"]))
 
     def test_missing_encryption_key_is_named(self):
         with patch("db.mcp_server_crud.get_token_encryption", side_effect=TokenSecurityError("no key")):

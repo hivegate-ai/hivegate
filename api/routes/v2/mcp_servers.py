@@ -7,17 +7,18 @@ Agents do not reference these servers yet; that is the follow-up PR.
 import logging
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlsplit
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from agents.mcp_validation import SUPPORTED_MCP_TRANSPORTS, mcp_url_problem, normalize_mcp_transport
 from api.services.token_security import TokenSecurityError
 from db.mcp_server_crud import (
     UNSET,
+    MCPServerExistsError,
     create_mcp_server,
     get_all_mcp_servers,
     get_mcp_server,
@@ -31,12 +32,12 @@ v2_mcp_servers_router = APIRouter(prefix="/mcp-servers", tags=["V2 MCP Servers"]
 
 # Lowercase so the id can prefix tool names (#95) without colliding by case.
 SERVER_ID_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,62}$"
-SUPPORTED_TRANSPORTS = ("http", "streamable-http")
-# RFC 9110 field-name token.
-_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+# RFC 9110 field-name token. Used with fullmatch: in Python `$` also matches before a
+# trailing newline, so "X-Key\n" would pass a ^...$ pattern.
+_HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 # Visible ASCII with inner spaces: what HTTP clients can send as-is. No leading or trailing
 # whitespace, which would otherwise surface as a confusing 401 only once chat connects.
-_HEADER_VALUE = re.compile(r"^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$")
+_HEADER_VALUE = re.compile(r"[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?")
 # Set by the HTTP client or the MCP transport; a static value would break or pin the session.
 RESERVED_HEADERS = frozenset(
     {
@@ -70,61 +71,41 @@ HEADERS_DESCRIPTION = "Static headers sent on every request (e.g. Authorization)
 
 
 def _check_url(value: str) -> str:
-    url = value.strip()
-    try:
-        parsed = urlsplit(url)
-        has_userinfo = parsed.username is not None or parsed.password is not None
-    except ValueError:
-        parsed, has_userinfo = None, False
-    if parsed is None or parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
-        raise ValueError("url must be an absolute http:// or https:// URL")
-    if has_userinfo:
+    problem = mcp_url_problem(value, allow_userinfo=False)
+    if problem == "userinfo":
         raise ValueError("url must not contain credentials (user:password@); send them as headers instead")
-    return url
+    if problem is not None:
+        raise ValueError("url must be an absolute http:// or https:// URL with a valid port")
+    return value.strip()
 
 
 def _check_transport(value: str) -> str:
-    transport = value.strip().lower()
-    if transport not in SUPPORTED_TRANSPORTS:
-        supported = ", ".join(repr(t) for t in SUPPORTED_TRANSPORTS)
+    transport = normalize_mcp_transport(value)
+    if transport is None:
+        supported = ", ".join(repr(t) for t in SUPPORTED_MCP_TRANSPORTS)
         raise ValueError(f"transport must be one of {supported}")
     return transport
 
 
-def _check_headers(value: Any) -> Dict[str, str]:
-    if not isinstance(value, dict):
-        raise ValueError("headers must be an object of header name to string value")
+def _check_headers(value: Dict[str, str]) -> Dict[str, str]:
+    # Values are never put in a message: they may be secrets. (422s do not echo the input
+    # either; see api/validation_errors.py.)
     if len(value) > MAX_HEADERS:
         raise ValueError(f"at most {MAX_HEADERS} headers")
     lowered = set()
     for name, header_value in value.items():
-        if not _HEADER_NAME.match(name):
+        if not _HEADER_NAME.fullmatch(name):
             raise ValueError(f"invalid header name {name!r}")
         if name.lower() in RESERVED_HEADERS:
             raise ValueError(f"header {name!r} is set by the MCP transport and cannot be configured")
         if name.lower() in lowered:
             raise ValueError(f"header {name!r} is given twice")
         lowered.add(name.lower())
-        # The value is never echoed back: it may be a secret.
-        if not isinstance(header_value, str) or not _HEADER_VALUE.match(header_value):
+        if not _HEADER_VALUE.fullmatch(header_value):
             raise ValueError(
                 f"header {name!r} needs a non-empty value of printable ASCII, with no leading or trailing whitespace"
             )
     return value
-
-
-def _headers_or_422(value: Any) -> Optional[Dict[str, str]]:
-    """Validate headers here rather than in the model: FastAPI's 422 echoes the submitted
-    input, and a rejected header value may be a secret. This 422 carries only the message."""
-    if value is None:
-        return None
-    try:
-        return _check_headers(value)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=[{"type": "value_error", "loc": ["body", "headers"], "msg": str(e)}],
-        )
 
 
 class _MCPServerFields(BaseModel):
@@ -134,12 +115,7 @@ class _MCPServerFields(BaseModel):
     url: Optional[str] = Field(default=None, description=URL_DESCRIPTION)
     transport: Optional[str] = None
     description: Optional[str] = Field(default=None, max_length=1000)
-    # Typed Any so a bad value is never echoed in a 422; validated by _headers_or_422.
-    headers: Optional[Any] = Field(
-        default=None,
-        description=HEADERS_DESCRIPTION,
-        json_schema_extra={"type": "object", "additionalProperties": {"type": "string"}},
-    )
+    headers: Optional[Dict[str, str]] = Field(default=None, description=HEADERS_DESCRIPTION)
 
     @field_validator("url")
     @classmethod
@@ -150,6 +126,11 @@ class _MCPServerFields(BaseModel):
     @classmethod
     def _valid_transport(cls, v: Optional[str]) -> Optional[str]:
         return v if v is None else _check_transport(v)
+
+    @field_validator("headers")
+    @classmethod
+    def _valid_headers(cls, v: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+        return v if v is None else _check_headers(v)
 
 
 class MCPServerCreate(_MCPServerFields):
@@ -204,9 +185,7 @@ def _to_response(server) -> MCPServerResponse:  # type: ignore[no-untyped-def]
 @v2_mcp_servers_router.post("", response_model=MCPServerResponse, status_code=status.HTTP_201_CREATED)
 async def create_mcp_server_v2(body: MCPServerCreate, db: Session = Depends(get_db)):
     """Register an MCP server. 409 if an active server already has this id."""
-    headers = _headers_or_422(body.headers)
-    if get_mcp_server(db, body.id):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"MCP server {body.id} already exists")
+    conflict = HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"MCP server {body.id} already exists")
     try:
         server = create_mcp_server(
             db=db,
@@ -215,11 +194,13 @@ async def create_mcp_server_v2(body: MCPServerCreate, db: Session = Depends(get_
             url=body.url,
             transport=body.transport,
             description=body.description,
-            headers=headers,
+            headers=body.headers,
         )
+    except MCPServerExistsError:
+        raise conflict
     except IntegrityError:
-        # Lost a race with a concurrent create of the same id.
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"MCP server {body.id} already exists")
+        # Lost a race with a concurrent insert of a brand-new id.
+        raise conflict
     except TokenSecurityError:
         logging.exception("Cannot encrypt MCP server headers")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ENCRYPTION_NOT_CONFIGURED)
@@ -248,7 +229,6 @@ async def get_mcp_server_v2(server_id: str, db: Session = Depends(get_db)):
 @v2_mcp_servers_router.put("/{server_id}", response_model=MCPServerResponse)
 async def update_mcp_server_v2(server_id: str, body: MCPServerUpdate, db: Session = Depends(get_db)):
     """Update the fields present in the body; see MCPServerUpdate for null and headers."""
-    headers = _headers_or_422(body.headers)
     try:
         server = update_mcp_server(
             db=db,
@@ -257,7 +237,7 @@ async def update_mcp_server_v2(server_id: str, body: MCPServerUpdate, db: Sessio
             url=body.url,
             transport=body.transport,
             description=body.description if "description" in body.model_fields_set else UNSET,
-            headers=headers,
+            headers=body.headers,
         )
     except TokenSecurityError:
         logging.exception("Cannot encrypt MCP server headers")
@@ -276,6 +256,13 @@ async def update_mcp_server_v2(server_id: str, body: MCPServerUpdate, db: Sessio
 async def delete_mcp_server_v2(server_id: str, db: Session = Depends(get_db)):
     """Soft delete; the server's headers are wiped. (Refusing to delete a server an agent
     references comes with the references.)"""
-    if not soft_delete_mcp_server(db, server_id):
+    try:
+        deleted = soft_delete_mcp_server(db, server_id)
+    except Exception as e:
+        logging.exception(f"Error deleting MCP server {server_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete MCP server {server_id}"
+        )
+    if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server {server_id} not found")
     return None

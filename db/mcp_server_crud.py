@@ -6,11 +6,11 @@ get_mcp_server_headers, which the chat path will call when it connects. header_n
 stored in the clear so the API can show which headers are configured without the key.
 """
 
-import datetime
 import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.services.token_security import get_token_encryption
@@ -21,6 +21,10 @@ AUTH_STATIC_HEADERS = "static_headers"
 
 # Marks an update argument that was not given, so None can mean "clear" for nullable fields.
 UNSET: Any = object()
+
+
+class MCPServerExistsError(Exception):
+    """An active server already has this id."""
 
 
 def _apply_headers(server: MCPServerDB, headers: Optional[Dict[str, str]]) -> None:
@@ -48,18 +52,32 @@ def create_mcp_server(
 ) -> MCPServerDB:
     """Create a server, or reactivate a soft-deleted one with the same id (overwriting it).
 
+    Raises MCPServerExistsError when an active server has the id. The row is read with
+    FOR UPDATE, so two concurrent creates of a soft-deleted id serialize: the second one
+    blocks, then sees the row active and raises, instead of both reactivating it and the
+    last write silently winning. (Two creates of a brand-new id race on the insert, and the
+    loser gets an IntegrityError.)
+
     A reactivated row is a new server in every way that matters (URL and credentials may
-    differ), so its created_at is reset too.
+    differ), so its created_at is reset too, from the database clock like the updated_at
+    trigger.
     """
     try:
-        server = db.query(MCPServerDB).filter(MCPServerDB.id == server_id, ~MCPServerDB.is_active).first()
+        server = (
+            db.query(MCPServerDB)
+            .filter(MCPServerDB.id == server_id)
+            .with_for_update()
+            .populate_existing()
+            .one_or_none()
+        )
+        if server is not None and server.is_active:
+            raise MCPServerExistsError(server_id)
         if server is None:
             server = MCPServerDB(id=server_id)
             db.add(server)
         else:
-            now = datetime.datetime.utcnow()
-            server.created_at = now  # type: ignore[assignment]
-            server.updated_at = now  # type: ignore[assignment]
+            server.created_at = func.now()  # type: ignore[assignment]
+            server.updated_at = func.now()  # type: ignore[assignment]
 
         server.name = name  # type: ignore[assignment]
         server.url = url  # type: ignore[assignment]
@@ -73,6 +91,9 @@ def create_mcp_server(
         db.refresh(server)
         logging.info(f"Saved MCP server {server_id}")
         return server
+    except MCPServerExistsError:
+        db.rollback()  # release the row lock
+        raise
     except Exception as e:
         db.rollback()
         logging.error(f"Error creating MCP server {server_id}: {e}")
@@ -139,9 +160,14 @@ def soft_delete_mcp_server(db: Session, server_id: str) -> bool:
     server = get_mcp_server(db, server_id)
     if server is None:
         return False
-    server.is_active = False  # type: ignore[assignment]
-    _apply_headers(server, None)
-    db.commit()
+    try:
+        server.is_active = False  # type: ignore[assignment]
+        _apply_headers(server, None)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Error deleting MCP server {server_id}: {e}")
+        raise
     logging.info(f"Soft deleted MCP server {server_id}")
     return True
 

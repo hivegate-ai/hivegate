@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from sqlalchemy import ARRAY, Boolean, Column, DateTime, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import ARRAY, Boolean, Column, DateTime, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase
 
@@ -276,8 +276,9 @@ class MCPServerDB(Base):
     encrypted_headers = Column(Text, nullable=True)
     header_names = Column(Text, nullable=True)  # JSON list of header names
     tenant_id = Column(String(255), nullable=True, index=True)  # NULL = shared; scoping is v0.9.0 (#226)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+    # Database clock, the same one the updated_at trigger uses, so the two never disagree.
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
 
 

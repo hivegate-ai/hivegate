@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Run `hivegate migrate` (or apply `db/migrations/012_create_mcp_servers_table.sql`) to create
   the `mcp_servers` table. Header values are encrypted with `SECRET_TOKEN_ENC_KEY`, the key user
   tokens already use
+- Validation errors (HTTP 422) no longer include `input`, on every route. FastAPI's default put
+  the rejected value there, and for a missing field the whole request body, so a typo next to an
+  access token or an MCP header sent the secret back in the error. `loc`, `msg` and `type` are
+  unchanged. A client that read `input` out of a 422 needs to change
+
+### Fixed
+- A chat agent's MCP server with transport `HTTP` (any capitalisation other than lowercase)
+  passed the chat check and was then dropped without its tools. Both now share one check
+- An MCP server URL with an invalid port (`:99999`, `:abc`) is refused by the chat check instead
+  of failing when chat connects
 
 ### Added
 - MCP server registry: `/v2/mcp-servers` registers an HTTP MCP server once (id, URL, transport,

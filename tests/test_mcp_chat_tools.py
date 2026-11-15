@@ -41,6 +41,12 @@ def test_streamable_http_type_accepted():
     assert len(build_mcp_toolkits(cfg)) == 1
 
 
+def test_transport_case_matches_the_chat_validation():
+    # validate_mcp_servers_for_chat accepts " HTTP "; this used to skip it silently.
+    cfg = _cfg([_S(name="pf", type=" HTTP ", url="https://x/mcp/", headers=None)])
+    assert len(build_mcp_toolkits(cfg)) == 1
+
+
 def test_unsupported_transports_are_ignored_with_warnings(caplog):
     cfg = _cfg(
         [
