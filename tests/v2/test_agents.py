@@ -645,9 +645,9 @@ class TestV2AgentsAPI(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["status"], "success")
         self.assertIn("test-agent-v2", data["message"])
-
-        # Verify cache clear endpoint returns success
-        # Note: Actual cache clearing behavior depends on implementation details
+        # Matched on the key's agent id segment, not the cached Agent's .id (its prompt slug).
+        with _cache_lock:
+            self.assertEqual(list(_agent_cache), ["456:other-agent:gemini-2.5-pro"])
 
     def test_clear_all_caches(self):
         """Test clearing all agent caches."""
@@ -685,8 +685,11 @@ class TestV2AgentsAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["agent_id"], "test-agent-v2")
-        self.assertEqual(data["agent_cache_count"], 0)
-        self.assertEqual(len(data["agent_cache_keys"]), 0)
+        self.assertEqual(data["agent_cache_count"], 2)
+        self.assertEqual(
+            sorted(data["agent_cache_keys"]),
+            ["123:test-agent-v2:gemini-2.5-pro", "456:test-agent-v2:gemini-2.0-flash"],
+        )
 
     def test_get_cache_info_all(self):
         """Test getting cache info for all agents."""

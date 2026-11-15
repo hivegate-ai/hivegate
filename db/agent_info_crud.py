@@ -252,6 +252,15 @@ def get_agent_tags(agent_info: AgentInfoDB) -> List[str]:
         return []
 
 
+def parse_agent_config(agent_info: AgentInfoDB) -> AgentConfig:
+    """The stored config, or defaults when none is stored. Raises when it is stored but does
+    not validate; use this rather than get_agent_config before writing the config back, or
+    the defaults overwrite it."""
+    if not agent_info.config:
+        return AgentConfig()
+    return AgentConfig.model_validate_json(agent_info.config)  # type: ignore[arg-type]
+
+
 def get_agent_config(agent_info: AgentInfoDB) -> AgentConfig:
     """
     Parse config from AgentInfoDB record, returning defaults if not set.
@@ -262,21 +271,27 @@ def get_agent_config(agent_info: AgentInfoDB) -> AgentConfig:
     Returns:
         AgentConfig instance (defaults if no config stored)
     """
-    if not agent_info.config:
-        return AgentConfig()  # Return defaults
-
     try:
-        return AgentConfig.model_validate_json(agent_info.config)  # type: ignore[arg-type]
+        return parse_agent_config(agent_info)
     except Exception:
         logging.warning(f"Failed to parse config for agent {agent_info.id}, using defaults")
         return AgentConfig()
 
 
+def _referenced_mcp_server_ids(agent_info: AgentInfoDB) -> List[str]:
+    """mcp_server_ids read from the raw config JSON, so a config that fails AgentConfig
+    validation for an unrelated field still counts as referencing its servers."""
+    try:
+        data = json.loads(agent_info.config or "{}")  # type: ignore[arg-type]
+    except (json.JSONDecodeError, TypeError):
+        return []
+    ids = data.get("mcp_server_ids") if isinstance(data, dict) else None
+    return [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else []
+
+
 def get_agents_using_mcp_server(db: Session, server_id: str) -> List[str]:
     """Ids of active agents whose config references this registered MCP server."""
-    return sorted(
-        str(agent.id) for agent in get_all_agent_info(db) if server_id in get_agent_config(agent).mcp_server_ids
-    )
+    return sorted(str(agent.id) for agent in get_all_agent_info(db) if server_id in _referenced_mcp_server_ids(agent))
 
 
 def agent_info_exists(db: Session, agent_id: str) -> bool:

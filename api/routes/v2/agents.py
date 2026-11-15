@@ -9,7 +9,7 @@ import uuid
 import zlib
 from contextlib import AsyncExitStack, aclosing
 from threading import Lock
-from typing import Any, AsyncGenerator, Dict, List, Optional, cast
+from typing import Annotated, Any, AsyncGenerator, Dict, List, Optional, cast
 
 from agno.agent import Agent
 from agno.db.base import SessionType
@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from google import genai
 from google.genai.types import File
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AfterValidator, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
@@ -55,6 +55,7 @@ from db.agent_info_crud import (
     get_agent_tags,
     get_agents_by_ids,
     get_all_agent_info,
+    parse_agent_config,
     soft_delete_agent_info,
     update_agent_info,
 )
@@ -180,6 +181,18 @@ def estimate_tokens(text: str) -> int:
 def _log_safe(value: object) -> str:
     """Strip CR/LF so request-derived values (agent/user/session ids) can't forge log lines."""
     return str(value).replace("\r", "").replace("\n", "")
+
+
+def _cached_keys_of(agent_id: str) -> List[str]:
+    """Cache keys of this agent. Matched on the key's agent_id segment (compute_cache_key):
+    a cached Agent's own .id is its prompt slug, not the agent id. Call with _cache_lock held."""
+    return [key for key in _agent_cache if key.split(":", 2)[1:2] == [agent_id]]
+
+
+def _evict_cached_agent(agent_id: str) -> None:
+    with _cache_lock:
+        for key in _cached_keys_of(agent_id):
+            del _agent_cache[key]
 
 
 def compute_cache_key(
@@ -546,10 +559,14 @@ def _check_mcp_server_ids(ids: List[str]) -> List[str]:
     return unique
 
 
-def _require_registered_mcp_servers(db: Session, server_ids: List[str]) -> None:
-    """400 naming every id with no active registered server."""
+MCPServerIds = Annotated[List[str], AfterValidator(_check_mcp_server_ids)]
+
+
+def _require_registered_mcp_servers(db: Session, server_ids: List[str], lock: bool = False) -> None:
+    """400 naming every id with no active registered server. lock=True holds the servers
+    against a concurrent delete until the caller commits (see get_mcp_servers_by_ids)."""
     try:
-        get_mcp_servers_by_ids(db, server_ids)
+        get_mcp_servers_by_ids(db, server_ids, lock=lock)
     except UnknownMCPServersError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -576,23 +593,13 @@ class AgentConfigRequest(BaseModel):
     worker_config: Optional[Dict[str, Any]] = None
 
     # Registered MCP servers (/v2/mcp-servers) to connect on chat, by id (#91)
-    mcp_server_ids: List[str] = Field(default_factory=list, description=MCP_SERVER_IDS_DESCRIPTION)
-
-    @field_validator("mcp_server_ids")
-    @classmethod
-    def _valid_mcp_server_ids(cls, v: List[str]) -> List[str]:
-        return _check_mcp_server_ids(v)
+    mcp_server_ids: MCPServerIds = Field(default_factory=list, description=MCP_SERVER_IDS_DESCRIPTION)
 
 
 class AgentMCPServersRequest(BaseModel):
     """The full list of registered MCP servers the agent uses; [] detaches them all."""
 
-    mcp_server_ids: List[str] = Field(..., description=MCP_SERVER_IDS_DESCRIPTION)
-
-    @field_validator("mcp_server_ids")
-    @classmethod
-    def _valid_mcp_server_ids(cls, v: List[str]) -> List[str]:
-        return _check_mcp_server_ids(v)
+    mcp_server_ids: MCPServerIds = Field(..., description=MCP_SERVER_IDS_DESCRIPTION)
 
 
 class AgentMCPServersResponse(BaseModel):
@@ -1414,6 +1421,9 @@ async def create_agent_v2(body: CreateAgentRequest, db: Session = Depends(get_db
                     config_kwargs["worker_config"] = WorkerConfig(**body.config.worker_config)
                 agent_config = AgentConfig(**config_kwargs)
 
+            if agent_config is not None and agent_config.mcp_server_ids:
+                # Again, locked this time: the prompt write above may have committed.
+                _require_registered_mcp_servers(db, agent_config.mcp_server_ids, lock=True)
             create_agent_info(
                 db=db,
                 agent_id=body.id,
@@ -1427,6 +1437,7 @@ async def create_agent_v2(body: CreateAgentRequest, db: Session = Depends(get_db
             logging.info(f"Agent {body.id} created successfully in database and storage backend")
         except Exception as db_error:
             # Rollback: Try to delete from storage backend if database creation fails
+            db.rollback()
             logging.error(f"Failed to create agent {body.id} in database: {db_error}")
             try:
                 prompt_storage.delete(prompt_id)
@@ -1434,6 +1445,8 @@ async def create_agent_v2(body: CreateAgentRequest, db: Session = Depends(get_db
             except Exception as rollback_error:
                 logging.error(f"Failed to rollback agent {body.id} from storage backend: {rollback_error}")
 
+            if isinstance(db_error, HTTPException):
+                raise  # a server was deleted between the two checks: still the 400
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to create agent {body.id} in database",
@@ -1527,8 +1540,18 @@ async def set_agent_mcp_servers_v2(agent_id: str, body: AgentMCPServersRequest, 
     db_agent = get_agent_info(db, agent_id)
     if not db_agent:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found")
-    _require_registered_mcp_servers(db, body.mcp_server_ids)
-    config = get_agent_config(db_agent).model_copy(update={"mcp_server_ids": body.mcp_server_ids})
+    try:
+        stored = parse_agent_config(db_agent)
+    except Exception:
+        # get_agent_config would hand back defaults, and saving them would wipe the rest of
+        # the agent's config (worker_config, memory, reasoning).
+        logging.exception(f"Stored config of agent {_log_safe(agent_id)} does not validate")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Agent {agent_id} has a stored config that no longer validates; fix it before changing MCP servers",
+        )
+    _require_registered_mcp_servers(db, body.mcp_server_ids, lock=True)
+    config = stored.model_copy(update={"mcp_server_ids": body.mcp_server_ids})
     try:
         update_agent_info(db, agent_id, config=config)
     except Exception as e:
@@ -1537,10 +1560,7 @@ async def set_agent_mcp_servers_v2(agent_id: str, body: AgentMCPServersRequest, 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update agent {agent_id}"
         )
-    # A cached (non-MCP) agent was built without these tools.
-    with _cache_lock:
-        for key in [key for (key, agent) in _agent_cache.items() if agent.id == agent_id]:
-            del _agent_cache[key]
+    _evict_cached_agent(agent_id)
     logging.info(f"Set MCP servers of agent {_log_safe(agent_id)}: {_log_safe(body.mcp_server_ids)}")
     return AgentMCPServersResponse(agent_id=agent_id, mcp_server_ids=body.mcp_server_ids)
 
@@ -2015,7 +2035,7 @@ async def clear_agent_cache_v2(agent_id: str, user_id: Optional[str] = None, ses
                 return {"status": "success", "message": "All caches cleared"}
             else:
                 # Clear specific agent caches
-                keys_to_remove = [key for (key, agent) in _agent_cache.items() if agent_id == agent.id]
+                keys_to_remove = _cached_keys_of(agent_id)
                 for key in keys_to_remove:
                     del _agent_cache[key]
                 logging.info(f"Cleared {len(keys_to_remove)} cache entries for agent {agent_id}")
@@ -2056,7 +2076,7 @@ async def get_cache_info_v2(agent_id: str):
                 }
             else:
                 # Return specific agent cache info
-                matching_keys = [key for (key, agent) in _agent_cache.items() if agent_id == agent.id]
+                matching_keys = _cached_keys_of(agent_id)
                 return {
                     "agent_id": agent_id,
                     "agent_cache_count": len(matching_keys),

@@ -6,6 +6,7 @@ SQLite + real Fernet key setup as test_mcp_server_registry.
 """
 
 import asyncio
+import json
 import os
 import unittest
 from unittest.mock import MagicMock, patch
@@ -121,6 +122,13 @@ class TestResolution(_AgentRefsBase):
         self.assertEqual(get_agents_using_mcp_server(self.db, "crm"), ["a", "b"])
         self.assertEqual(get_agents_using_mcp_server(self.db, "nope"), [])
 
+    def test_agent_with_an_invalid_config_still_counts_as_a_user(self):
+        self._server("crm")
+        self._agent("broken")
+        get_agent_info(self.db, "broken").config = json.dumps({"mcp_server_ids": ["crm"], "num_history_runs": "x"})
+        self.db.commit()
+        self.assertEqual(get_agents_using_mcp_server(self.db, "crm"), ["broken"])
+
 
 class TestRoutes(_AgentRefsBase):
     def setUp(self):
@@ -173,6 +181,50 @@ class TestRoutes(_AgentRefsBase):
                 self.assertEqual(response.status_code, 422)
         self.assertEqual(self._config("bot").mcp_server_ids, ["crm"])  # unchanged
         self.assertEqual(self.client.put("/v2/agents/nope/mcp-servers", json={"mcp_server_ids": []}).status_code, 404)
+
+    def test_attach_refuses_to_overwrite_a_config_that_does_not_validate(self):
+        self._server("crm")
+        self._agent("bot")
+        bad = json.dumps({"num_history_runs": "x", "worker_config": {"worker_pool": "gpu"}})
+        get_agent_info(self.db, "bot").config = bad
+        self.db.commit()
+        response = self.client.put("/v2/agents/bot/mcp-servers", json={"mcp_server_ids": ["crm"]})
+        self.assertEqual(response.status_code, 409)
+        self.db.expire_all()
+        self.assertEqual(get_agent_info(self.db, "bot").config, bad)  # not replaced by defaults
+
+    def test_attach_evicts_the_cached_agent(self):
+        from api.routes.v2.agents import _agent_cache, _cache_lock
+
+        self._server("crm")
+        self._agent("bot")
+        with _cache_lock:
+            _agent_cache["1:bot:model:u:s"] = MagicMock(id="bot_prompt_slug")
+            _agent_cache["2:other:model:u:s"] = MagicMock(id="other")
+        self.client.put("/v2/agents/bot/mcp-servers", json={"mcp_server_ids": ["crm"]})
+        with _cache_lock:
+            self.assertEqual(list(_agent_cache), ["2:other:model:u:s"])
+            _agent_cache.clear()
+
+    def test_create_rechecks_after_writing_the_prompt(self):
+        """A server deleted between the early check and the agent write is still a 400, and
+        the prompt written in between is removed."""
+        self._server("crm")
+        body = {"id": "bot", "name": "Bot", "template": "Hi", "config": {"mcp_server_ids": ["crm"]}}
+        storage = MagicMock()
+
+        def delete_server(**kwargs):
+            db = self.SessionLocal()
+            soft_delete_mcp_server(db, "crm")
+            db.close()
+
+        storage.create.side_effect = delete_server
+        with patch("api.routes.v2.agents.get_prompt_storage", return_value=storage):
+            response = self.client.post("/v2/agents", json=body)
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("crm", response.json()["detail"])
+        storage.delete.assert_called_once()
+        self.assertIsNone(get_agent_info(self.db, "bot"))
 
     def test_create_agent_with_server_ids(self):
         self._server("crm")

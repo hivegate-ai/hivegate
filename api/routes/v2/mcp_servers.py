@@ -258,10 +258,13 @@ async def update_mcp_server_v2(server_id: str, body: MCPServerUpdate, db: Sessio
 async def delete_mcp_server_v2(server_id: str, db: Session = Depends(get_db)):
     """Soft delete; the server's headers are wiped. 409 while an agent still uses it (its
     chats would start failing): detach it with PUT /v2/agents/{agent_id}/mcp-servers first."""
-    if get_mcp_server(db, server_id) is None:
+    # Locked until the delete commits, so an attach running now waits and then sees the
+    # server gone (see get_mcp_servers_by_ids).
+    if get_mcp_server(db, server_id, lock=True) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server {server_id} not found")
     users = get_agents_using_mcp_server(db, server_id)
     if users:
+        db.rollback()  # release the lock
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"MCP server {server_id} is used by agents: {', '.join(users)}. Remove it from them first.",
