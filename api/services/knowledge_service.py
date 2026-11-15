@@ -624,5 +624,7 @@ def get_knowledge_service() -> KnowledgeService:
     if _knowledge_service is None:
         from agno.knowledge.embedder.google import GeminiEmbedder
 
-        _knowledge_service = KnowledgeService(embedder=GeminiEmbedder())
+        from agents.gemini_api import gemini_client_params
+
+        _knowledge_service = KnowledgeService(embedder=GeminiEmbedder(client_params=gemini_client_params()))
     return _knowledge_service

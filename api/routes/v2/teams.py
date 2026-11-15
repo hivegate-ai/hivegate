@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
+from agents.gemini_api import gemini_client_params
 from agents.provider_models import humanize_billing_error
 from agents.hitl import requirements_for
 from agents.model_resolver import resolve_model_id
@@ -425,7 +426,11 @@ def create_team(
 
     # Create MemoryManager
     memory_manager = MemoryManager(
-        model=Gemini(id=resolve_model_id(model_id), api_key=api_settings.gemini_api_key),
+        model=Gemini(
+            id=resolve_model_id(model_id),
+            api_key=api_settings.gemini_api_key,
+            client_params=gemini_client_params(),
+        ),
         db=db_instance,
         delete_memories=True,
         clear_memories=True,
@@ -467,7 +472,11 @@ def create_team(
         session_id=session_id,
         members=members,
         mode=TeamMode.coordinate,
-        model=Gemini(id=resolve_model_id(model_id), api_key=api_settings.gemini_api_key),
+        model=Gemini(
+            id=resolve_model_id(model_id),
+            api_key=api_settings.gemini_api_key,
+            client_params=gemini_client_params(),
+        ),
         compress_tool_results=True,
         enable_agentic_state=True,
         add_datetime_to_context=True,
