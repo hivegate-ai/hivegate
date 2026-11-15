@@ -817,8 +817,9 @@ class DriveToolkit(BaseToolkit):
 
                 from api.services.knowledge_service import get_knowledge_service
 
-                # Get dynamic knowledge base
-                dynamic_kb = get_knowledge_service().get_dynamic_kb()
+                # Knowledge base for indexing (refuses an embedder the collection doesn't fit)
+                knowledge_service = get_knowledge_service()
+                dynamic_kb = knowledge_service.get_compatible_kb()
 
                 # Prepare metadata
                 metadata = {
@@ -829,6 +830,7 @@ class DriveToolkit(BaseToolkit):
                     "file_type": "company",
                     "content_type": mime_type,
                     "source_id": file_id,
+                    **knowledge_service.embedding_metadata(),
                 }
 
                 # Get appropriate reader for the file extension
