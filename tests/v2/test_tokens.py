@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from tests.test_utils import create_test_client
+from toolkits.token_cache import TokenCache
 
 
 class TestTokensAPIIntegration(unittest.TestCase):
@@ -76,6 +77,33 @@ class TestTokensAPIIntegration(unittest.TestCase):
         self.assertEqual(data["provider"], "google")
         self.assertEqual(data["token_type"], "oauth2")
         self.assertIn("Token stored successfully", data["message"])
+
+    @patch("api.routes.v2.tokens.create_user_token")
+    def test_cache_eviction_requires_successful_store_and_targets_only_matching_key(self, mock_save):
+        cache = TokenCache()
+        integration_key = "google_calendar"
+        cache.get_token(integration_key, self.user_id, lambda: "old-access-token")
+        cache.get_token(integration_key, "another_user", lambda: "other-user-token")
+        cache.get_token("google_drive", self.user_id, lambda: "other-integration-token")
+        request_data = {
+            "integration_key": integration_key,
+            "provider": "google",
+            "token_type": "oauth2",
+            "token_data": self.oauth2_token_data,
+        }
+
+        with patch("api.routes.v2.tokens.token_cache", cache):
+            mock_save.side_effect = RuntimeError("simulated storage failure")
+            self.assertEqual(self.client.post(self.base_url, json=request_data).status_code, 500)
+            self.assertEqual(cache.get_token(integration_key, self.user_id, lambda: "cache-miss"), "old-access-token")
+
+            mock_save.side_effect = None
+            mock_save.return_value.created_at = datetime(2026, 1, 1)
+            self.assertEqual(self.client.post(self.base_url, json=request_data).status_code, 201)
+
+        self.assertEqual(cache.get_token(integration_key, self.user_id, lambda: "new-access-token"), "new-access-token")
+        self.assertEqual(cache.get_token(integration_key, "another_user", lambda: "cache-miss"), "other-user-token")
+        self.assertEqual(cache.get_token("google_drive", self.user_id, lambda: "cache-miss"), "other-integration-token")
 
     @patch("db.user_token_crud.get_token_encryption")
     def test_store_api_key_token_success(self, mock_get_encryption):
