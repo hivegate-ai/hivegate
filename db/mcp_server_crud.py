@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from api.services.logging import log_safe
 from api.services.token_security import get_token_encryption
 from db.db_models import MCPServerDB
+from supervisor.models import MCPServerConfig
 
 AUTH_NONE = "none"
 AUTH_STATIC_HEADERS = "static_headers"
@@ -171,6 +172,45 @@ def soft_delete_mcp_server(db: Session, server_id: str) -> bool:
         raise
     logging.info(f"Soft deleted MCP server {log_safe(server_id)}")
     return True
+
+
+class UnknownMCPServersError(Exception):
+    """Ids with no active registered server (never registered, or deleted)."""
+
+    def __init__(self, server_ids: List[str]):
+        super().__init__(", ".join(server_ids))
+        self.server_ids = server_ids
+
+
+def get_mcp_servers_by_ids(db: Session, server_ids: List[str]) -> List[MCPServerDB]:
+    """The active servers for these ids, in the order given. Raises UnknownMCPServersError
+    naming every id that has none."""
+    if not server_ids:
+        return []
+    found = {
+        str(s.id): s for s in db.query(MCPServerDB).filter(MCPServerDB.id.in_(server_ids), MCPServerDB.is_active).all()
+    }
+    missing = [i for i in server_ids if i not in found]
+    if missing:
+        raise UnknownMCPServersError(missing)
+    return [found[i] for i in server_ids]
+
+
+def mcp_server_configs_for_chat(db: Session, server_ids: List[str]) -> List[MCPServerConfig]:
+    """Registered servers as the MCPServerConfig the chat path connects to, headers decrypted.
+
+    Raises UnknownMCPServersError, or TokenSecurityError when the headers cannot be decrypted.
+    """
+    return [
+        MCPServerConfig(
+            name=str(server.id),
+            type=str(server.transport),
+            url=str(server.url),
+            headers=get_mcp_server_headers(server),
+            description=server.description,  # type: ignore[arg-type]
+        )
+        for server in get_mcp_servers_by_ids(db, server_ids)
+    ]
 
 
 def get_mcp_server_header_names(server: MCPServerDB) -> List[str]:

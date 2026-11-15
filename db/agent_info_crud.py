@@ -5,7 +5,7 @@ import json
 import logging
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from db.db_models import AgentInfoDB
@@ -29,6 +29,10 @@ class AgentConfig(BaseModel):
 
     # Supervisor worker settings (optional — only for agents used as supervisor workers)
     worker_config: Optional[WorkerConfig] = None
+
+    # Registered MCP servers (/v2/mcp-servers) the agent's chat connects to, by id (#91).
+    # Chat only: supervisor and container workers keep using worker_config.mcp_servers.
+    mcp_server_ids: List[str] = Field(default_factory=list)
 
 
 def create_agent_info(
@@ -265,6 +269,13 @@ def get_agent_config(agent_info: AgentInfoDB) -> AgentConfig:
     except Exception:
         logging.warning(f"Failed to parse config for agent {agent_info.id}, using defaults")
         return AgentConfig()
+
+
+def get_agents_using_mcp_server(db: Session, server_id: str) -> List[str]:
+    """Ids of active agents whose config references this registered MCP server."""
+    return sorted(
+        str(agent.id) for agent in get_all_agent_info(db) if server_id in get_agent_config(agent).mcp_server_ids
+    )
 
 
 def agent_info_exists(db: Session, agent_id: str) -> bool:

@@ -3,6 +3,7 @@ import copy
 import json
 import logging
 import os
+import re
 import time
 import uuid
 import zlib
@@ -21,13 +22,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from google import genai
 from google.genai.types import File
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
 from agents.hitl import requirements_for
 from agents.mcp_validation import SUPPORTED_MCP_TRANSPORTS, mcp_url_problem, normalize_mcp_transport
-from agents.agent import build_mcp_toolkits, ensure_mcp_ready, get_agent_db
+from agents.agent import build_mcp_toolkits, connect_mcp_toolkits, get_agent_db
 from agents.agent import get_agent as get_agent_impl
 from agents.agent import slug_to_table_name
 from agents.model_factory import ProviderNotConfiguredError
@@ -38,8 +39,10 @@ from api.provider_errors import error_payload, failed_run_response, run_error_ev
 from api.services import usage as usage_service
 from api.services.access_token import fetch_access_token, has_access_tokens_batch  # noqa: F401
 from api.services.auth import get_api_key
+from api.services.token_security import TokenSecurityError
 from api.services.models import PullPromptResponse
 from api.services.prompts_client import prompts_client
+from api.routes.v2.mcp_servers import ENCRYPTION_NOT_CONFIGURED, SERVER_ID_PATTERN
 from api.settings import api_settings
 from cache.prompts_cache import is_cache_initialized
 from prompts.storage import get_prompt_storage
@@ -53,9 +56,12 @@ from db.agent_info_crud import (
     get_agents_by_ids,
     get_all_agent_info,
     soft_delete_agent_info,
+    update_agent_info,
 )
 from db.db_models import ApiKeyDB
+from db.mcp_server_crud import UnknownMCPServersError, get_mcp_servers_by_ids, mcp_server_configs_for_chat
 from db.session import get_db
+from supervisor.models import WorkerConfig
 
 # Agent caching infrastructure
 _agent_cache: Dict[str, Agent] = {}
@@ -276,6 +282,7 @@ class AgentConfigResponse(BaseModel):
     enable_reasoning: bool = False
     reasoning_min_steps: int = 1
     reasoning_max_steps: int = 10
+    mcp_server_ids: List[str] = []
 
 
 class AgentInfo(BaseModel):
@@ -520,6 +527,36 @@ class ChatResponse(BaseModel):
     tools: Optional[List[Dict[str, Any]]] = None
 
 
+MAX_MCP_SERVERS_PER_AGENT = 20
+MCP_SERVER_IDS_DESCRIPTION = (
+    "Ids of servers registered at /v2/mcp-servers. Chat connects them in addition to any "
+    "worker_config.mcp_servers. Each must exist (400 otherwise)."
+)
+
+
+def _check_mcp_server_ids(ids: List[str]) -> List[str]:
+    """Shape only (existence is checked against the database by the route): valid ids, at
+    most MAX_MCP_SERVERS_PER_AGENT, duplicates dropped in order."""
+    unique = list(dict.fromkeys(ids))
+    if len(unique) > MAX_MCP_SERVERS_PER_AGENT:
+        raise ValueError(f"at most {MAX_MCP_SERVERS_PER_AGENT} MCP servers per agent")
+    for server_id in unique:
+        if not re.fullmatch(SERVER_ID_PATTERN, server_id):
+            raise ValueError(f"invalid MCP server id {server_id!r}")
+    return unique
+
+
+def _require_registered_mcp_servers(db: Session, server_ids: List[str]) -> None:
+    """400 naming every id with no active registered server."""
+    try:
+        get_mcp_servers_by_ids(db, server_ids)
+    except UnknownMCPServersError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"MCP servers not registered (or deleted): {', '.join(e.server_ids)}. Register them at /v2/mcp-servers first.",
+        )
+
+
 class AgentConfigRequest(BaseModel):
     """Agent configuration options for creation/update."""
 
@@ -537,6 +574,30 @@ class AgentConfigRequest(BaseModel):
 
     # Supervisor worker settings (optional)
     worker_config: Optional[Dict[str, Any]] = None
+
+    # Registered MCP servers (/v2/mcp-servers) to connect on chat, by id (#91)
+    mcp_server_ids: List[str] = Field(default_factory=list, description=MCP_SERVER_IDS_DESCRIPTION)
+
+    @field_validator("mcp_server_ids")
+    @classmethod
+    def _valid_mcp_server_ids(cls, v: List[str]) -> List[str]:
+        return _check_mcp_server_ids(v)
+
+
+class AgentMCPServersRequest(BaseModel):
+    """The full list of registered MCP servers the agent uses; [] detaches them all."""
+
+    mcp_server_ids: List[str] = Field(..., description=MCP_SERVER_IDS_DESCRIPTION)
+
+    @field_validator("mcp_server_ids")
+    @classmethod
+    def _valid_mcp_server_ids(cls, v: List[str]) -> List[str]:
+        return _check_mcp_server_ids(v)
+
+
+class AgentMCPServersResponse(BaseModel):
+    agent_id: str
+    mcp_server_ids: List[str]
 
 
 class CreateAgentRequest(BaseModel):
@@ -847,9 +908,7 @@ async def _mcp_chat_streamer(
     """
     async with AsyncExitStack() as stack:
         try:
-            for toolkit in mcp_toolkits:
-                await stack.enter_async_context(toolkit)
-            ensure_mcp_ready(mcp_toolkits)
+            await stack.enter_async_context(connect_mcp_toolkits(mcp_toolkits))
             agent = build_agent_fn(mcp_toolkits)
         except Exception:
             # The stream's status (200) is already sent, so surface a structured SSE
@@ -966,6 +1025,34 @@ def validate_mcp_servers_for_chat(agent_config: AgentConfig | None) -> None:
             )
 
 
+def _with_registered_mcp_servers(db: Session, agent_id: str, agent_config: AgentConfig | None) -> AgentConfig | None:
+    """The config chat builds MCP toolkits from: the embedded worker_config.mcp_servers plus
+    the registered servers in mcp_server_ids, resolved now so a server edited at
+    /v2/mcp-servers takes effect on the next message. A per-request copy; nothing is saved.
+
+    400 when a referenced server is gone (deletes of referenced servers are refused, so only
+    a race gets here), 500 when its headers cannot be decrypted.
+    """
+    if agent_config is None or not agent_config.mcp_server_ids:
+        return agent_config
+    try:
+        registered = mcp_server_configs_for_chat(db, agent_config.mcp_server_ids)
+    except UnknownMCPServersError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Agent {agent_id} uses MCP servers that are not registered (or were deleted): "
+                f"{', '.join(e.server_ids)}. Re-register them or update the agent's mcp_server_ids."
+            ),
+        )
+    except TokenSecurityError:
+        logging.exception("Cannot decrypt MCP server headers")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ENCRYPTION_NOT_CONFIGURED)
+    worker_config = agent_config.worker_config or WorkerConfig()
+    merged = worker_config.model_copy(update={"mcp_servers": [*worker_config.mcp_servers, *registered]})
+    return agent_config.model_copy(update={"worker_config": merged})
+
+
 @v2_agents_router.post("/{agent_id}/chat", status_code=status.HTTP_200_OK)
 async def chat_with_agent_v2(
     agent_id: str,
@@ -1002,11 +1089,12 @@ async def chat_with_agent_v2(
 
         validate_mcp_servers_for_chat(agent_config)
 
-        # MCP-tool agents (config.worker_config.mcp_servers): build a fresh agent per
-        # request and run it inside the live MCP session(s). We bypass the agent cache
-        # because the agno MCP toolkit holds a connection that isn't safe to reuse across
-        # requests. Non-MCP agents fall through to the cached path below, unchanged.
-        mcp_toolkits = build_mcp_toolkits(agent_config)
+        # MCP-tool agents (registered servers in config.mcp_server_ids, and servers embedded
+        # in config.worker_config.mcp_servers): build a fresh agent per request and run it
+        # inside the live MCP session(s). We bypass the agent cache because the agno MCP
+        # toolkit holds a connection that isn't safe to reuse across requests. Non-MCP
+        # agents fall through to the cached path below, unchanged.
+        mcp_toolkits = build_mcp_toolkits(_with_registered_mcp_servers(db, agent_id, agent_config))
         if mcp_toolkits:
 
             def _build_mcp_agent(connected_toolkits):
@@ -1033,9 +1121,7 @@ async def chat_with_agent_v2(
             logging.info(f"Processing v2 non-streaming request (MCP) for agent: {agent_id}")
             async with AsyncExitStack() as stack:
                 try:
-                    for toolkit in mcp_toolkits:
-                        await stack.enter_async_context(toolkit)
-                    ensure_mcp_ready(mcp_toolkits)
+                    await stack.enter_async_context(connect_mcp_toolkits(mcp_toolkits))
                 except Exception:
                     logging.error("MCP connect failed (non-streaming)", exc_info=True)
                     raise HTTPException(
@@ -1261,7 +1347,7 @@ async def create_agent_v2(body: CreateAgentRequest, db: Session = Depends(get_db
     Returns:
         CreateAgentResponse: Confirmation of agent creation with details
     """
-    logging.info(f"Request to create new agent: {body.id}")
+    logging.info(f"Request to create new agent: {_log_safe(body.id)}")
 
     # Check if agent already exists in database
     if agent_info_exists(db, body.id):
@@ -1275,6 +1361,9 @@ async def create_agent_v2(body: CreateAgentRequest, db: Session = Depends(get_db
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Agent ID can only contain letters, numbers, underscores, and hyphens",
         )
+
+    if body.config and body.config.mcp_server_ids:
+        _require_registered_mcp_servers(db, body.config.mcp_server_ids)
 
     try:
         # Create prompt using the configured storage backend (postgres, langsmith, or service)
@@ -1317,6 +1406,7 @@ async def create_agent_v2(body: CreateAgentRequest, db: Session = Depends(get_db
                     "enable_reasoning": body.config.enable_reasoning,
                     "reasoning_min_steps": body.config.reasoning_min_steps,
                     "reasoning_max_steps": body.config.reasoning_max_steps,
+                    "mcp_server_ids": body.config.mcp_server_ids,
                 }
                 if body.config.worker_config:
                     from supervisor.models import WorkerConfig
@@ -1428,6 +1518,31 @@ async def delete_agent_v2(agent_id: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete agent {agent_id}: {str(e)}"
         )
+
+
+@v2_agents_router.put("/{agent_id}/mcp-servers", response_model=AgentMCPServersResponse)
+async def set_agent_mcp_servers_v2(agent_id: str, body: AgentMCPServersRequest, db: Session = Depends(get_db)):
+    """Replace the registered MCP servers an agent's chat connects to. 400 for an id with no
+    registered server, 404 for an unknown agent. Other config is left as it is."""
+    db_agent = get_agent_info(db, agent_id)
+    if not db_agent:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found")
+    _require_registered_mcp_servers(db, body.mcp_server_ids)
+    config = get_agent_config(db_agent).model_copy(update={"mcp_server_ids": body.mcp_server_ids})
+    try:
+        update_agent_info(db, agent_id, config=config)
+    except Exception as e:
+        db.rollback()
+        logging.exception(f"Error updating MCP servers of agent {_log_safe(agent_id)}: {_log_safe(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update agent {agent_id}"
+        )
+    # A cached (non-MCP) agent was built without these tools.
+    with _cache_lock:
+        for key in [key for (key, agent) in _agent_cache.items() if agent.id == agent_id]:
+            del _agent_cache[key]
+    logging.info(f"Set MCP servers of agent {_log_safe(agent_id)}: {_log_safe(body.mcp_server_ids)}")
+    return AgentMCPServersResponse(agent_id=agent_id, mcp_server_ids=body.mcp_server_ids)
 
 
 @v2_agents_router.post("/{agent_id}/chat/commit", status_code=status.HTTP_200_OK)

@@ -25,7 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - MCP server registry: `/v2/mcp-servers` registers an HTTP MCP server once (id, URL, transport,
   optional static headers). Header values are encrypted at rest and responses list only their
-  names. Agents cannot reference these servers yet; that comes next (#91)
+  names (#91)
+- Agents use registered MCP servers by id: `config.mcp_server_ids` on `POST /v2/agents`, or
+  `PUT /v2/agents/{agent_id}/mcp-servers` for an existing agent. Chat connects them alongside
+  any `worker_config.mcp_servers`, and resolves them on every message, so editing a server
+  changes every agent that uses it. An unknown or deleted id is a 400; deleting a server an
+  agent still uses is a 409 naming the agents. Supervisor and container workers keep
+  `worker_config.mcp_servers` (#91)
 
 ## [0.4.0] - 2026-11-11
 
