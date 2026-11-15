@@ -146,7 +146,9 @@ def _list_openai(api_key: str) -> List[Tuple[str, float]]:
 def _list_google(api_key: str) -> List[str]:
     from google import genai
 
-    client = genai.Client(api_key=api_key)
+    from agents.gemini_api import gemini_http_options
+
+    client = genai.Client(api_key=api_key, http_options=gemini_http_options())
     return [(m.name or "").removeprefix("models/") for m in client.models.list()]
 
 

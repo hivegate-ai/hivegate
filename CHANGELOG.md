@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-15
+
+### Fixed
+- Gemini works again with google-genai 3.0, which `pip install hivegate-ai==0.4.0` now
+  resolves to. That release changed the client's default API version from `v1beta` to `v1`,
+  where gemini-2.5 models refuse function calling (400) and preview models, including the
+  default `gemini-3-flash-preview`, are not found (404). Every Gemini client HiveGate builds
+  now pins `v1beta`: chat models, teams, the knowledge embedder, model listing and file
+  uploads. Vertex AI (`GOOGLE_GENAI_USE_VERTEXAI=true`) keeps its own default, `v1beta1`.
+  The 0.4.0 Docker image pins google-genai 2.34 and was not affected (#234)
+
 ## [0.4.0] - 2026-11-11
 
 ### Upgrading

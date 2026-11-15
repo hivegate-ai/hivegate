@@ -30,6 +30,7 @@ from agents.hitl import requirements_for
 from agents.agent import build_mcp_toolkits, ensure_mcp_ready, get_agent_db
 from agents.agent import get_agent as get_agent_impl
 from agents.agent import slug_to_table_name
+from agents.gemini_api import gemini_http_options
 from agents.model_factory import ProviderNotConfiguredError
 from agents.model_resolver import resolve_model_id
 from agents.provider_models import humanize_billing_error
@@ -235,7 +236,7 @@ def upload_file_to_google(content_bytes: bytes, mime_type: str) -> File:
 
     try:
         # Initialize Google GenAI client
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=api_key, http_options=gemini_http_options())
 
         # Create file-like object from bytes
         file_obj = io.BytesIO(content_bytes)
