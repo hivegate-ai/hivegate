@@ -8,6 +8,11 @@ from agno.knowledge.document import Document
 from agno.vectordb import qdrant
 from sqlalchemy.orm import Session
 
+from api.services.embedders import (
+    DEFAULT_KNOWLEDGE_COLLECTION,
+    create_embedder,
+    embedder_dimensions,
+)
 from api.settings import api_settings
 from db.db_models import KnowledgeEntryDB
 from db.knowledge_crud import (
@@ -17,17 +22,29 @@ from db.knowledge_crud import (
 )
 
 
+class KnowledgeEmbedderMismatchError(RuntimeError):
+    """The Qdrant collection was created with a different vector size than the embedder's."""
+
+
 class KnowledgeService:
     """Service layer that bridges the Knowledge API with dynamic knowledge bases."""
 
     def __init__(
         self,
         embedder=None,
+        collection: str = DEFAULT_KNOWLEDGE_COLLECTION,
+        embedder_name: Optional[str] = None,
     ):
         self.qdrant_url = getattr(api_settings, "qdrant_url", None)
         self.qdrant_api_key = getattr(api_settings, "qdrant_api_key", None)
         self.qdrant_port = getattr(api_settings, "qdrant_port", 6333)
         self.embedder = embedder
+        self.collection = collection
+        # Recorded on every chunk, so a collection holding mixed embeddings can be spotted.
+        self.embedder_name = embedder_name
+        # Set by get_dynamic_kb() when the collection's vector size doesn't match the
+        # embedder; indexing and search are refused until the configuration is fixed.
+        self.embedder_error: Optional[str] = None
         # Knowledge base for unified operations
         self._knowledge: Optional[Knowledge] = None
         self._valid_metadata_filters: set[str] = set()
@@ -40,7 +57,7 @@ class KnowledgeService:
         if self._knowledge is None:
             # Create Qdrant vector database with explicit parameters
             qdrant_params = {
-                "collection": "unified_knowledge",
+                "collection": self.collection,
                 "embedder": self.embedder,
             }
 
@@ -58,11 +75,55 @@ class KnowledgeService:
             if not vector_db.exists():
                 logging.info("Creating collection")
                 vector_db.create()
+            else:
+                self.embedder_error = self._dimension_mismatch(vector_db)
+                if self.embedder_error:
+                    logging.error(self.embedder_error)
 
             # Create Knowledge instance with vector_db
-            self._knowledge = Knowledge(name="unified_knowledge", vector_db=vector_db, contents_db=db)
+            self._knowledge = Knowledge(name=self.collection, vector_db=vector_db, contents_db=db)
 
         return self._knowledge
+
+    def get_compatible_kb(self) -> Knowledge:
+        """The knowledge base, for indexing or search; refuses a mismatched embedder.
+
+        Agents keep using get_dynamic_kb(), so a misconfigured embedder never fails a chat.
+        """
+        kb = self.get_dynamic_kb()
+        if self.embedder_error:
+            raise KnowledgeEmbedderMismatchError(self.embedder_error)
+        return kb
+
+    def embedding_metadata(self) -> Dict:
+        """The embedder that produced a chunk, stored in its meta_data."""
+        if self.embedder_name is None:
+            return {}
+        return {"embedding_model": self.embedder_name, "embedding_dimensions": embedder_dimensions(self.embedder)}
+
+    def _dimension_mismatch(self, vector_db) -> Optional[str]:
+        """Describe a vector-size mismatch between the existing collection and the embedder.
+
+        agno creates the collection once, sized for the embedder of the day, so switching
+        embedders on an existing collection would otherwise break every upsert and search.
+        """
+        expected = embedder_dimensions(self.embedder)
+        try:
+            vectors = vector_db.client.get_collection(self.collection).config.params.vectors
+            if isinstance(vectors, dict):  # named vectors (hybrid search)
+                vectors = vectors.get(getattr(vector_db, "dense_vector_name", ""))
+            actual = getattr(vectors, "size", None)
+        except Exception as e:
+            logging.warning(f"Could not read the vector size of Qdrant collection '{self.collection}': {e}")
+            return None
+        if actual is None or actual == expected:
+            return None
+        return (
+            f"Qdrant collection '{self.collection}' stores {actual}-dimension vectors, but the knowledge "
+            f"embedder {self.embedder_name or type(self.embedder).__name__} produces {expected}. "
+            "Knowledge indexing and search are disabled. Set KNOWLEDGE_COLLECTION to a new collection "
+            "and re-ingest, or set KNOWLEDGE_EMBEDDER_DIMENSIONS to match if the model supports it."
+        )
 
     def _fetch_url_content(self, url: str) -> str:
         """Fetch content from a URL.
@@ -384,9 +445,10 @@ class KnowledgeService:
             # Add any additional metadata from the entry
             if entry.entry_metadata:
                 base_meta.update(entry.entry_metadata)
+            base_meta.update(self.embedding_metadata())
 
-            # Get dynamic knowledge base
-            dynamic_kb = self.get_dynamic_kb()
+            # Get dynamic knowledge base (refuses an embedder the collection doesn't fit)
+            dynamic_kb = self.get_compatible_kb()
 
             # Check if this content should be added directly
             content_type = entry.content_type or ""
@@ -543,8 +605,8 @@ class KnowledgeService:
             if collection_id:
                 search_filters["meta_data.collection_id"] = collection_id
 
-            # Perform search using dynamic KB
-            dynamic_kb = self.get_dynamic_kb()
+            # Perform search using dynamic KB (refuses an embedder the collection doesn't fit)
+            dynamic_kb = self.get_compatible_kb()
             results = dynamic_kb.search(query, max_results=k, filters=search_filters)
 
             # Convert Document objects to dict format for backward compatibility
@@ -622,9 +684,11 @@ def get_knowledge_service() -> KnowledgeService:
     """Get the global knowledge service instance with lazy initialization."""
     global _knowledge_service
     if _knowledge_service is None:
-        from agno.knowledge.embedder.google import GeminiEmbedder
-
-        from agents.gemini_api import gemini_client_params
-
-        _knowledge_service = KnowledgeService(embedder=GeminiEmbedder(client_params=gemini_client_params()))
+        # KNOWLEDGE_EMBEDDER; unset is google:gemini-embedding-001, today's behaviour.
+        spec = api_settings.knowledge_embedder
+        _knowledge_service = KnowledgeService(
+            embedder=create_embedder(spec, api_settings.knowledge_embedder_dimensions),
+            collection=api_settings.knowledge_collection,
+            embedder_name=spec,
+        )
     return _knowledge_service

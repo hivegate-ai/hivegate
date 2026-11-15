@@ -98,6 +98,26 @@ async def lifespan(app: FastAPI):
     app.include_router(get_v2_router())
     logging.info("V2 router included successfully")
 
+    # Knowledge embedder (#119): build it now so a missing optional package fails startup
+    # with its name, rather than every chat failing later.
+    from api.services.knowledge_service import get_knowledge_service
+    from api.settings import api_settings
+
+    knowledge_service = get_knowledge_service()
+    logging.info(
+        f"Knowledge embedder: {api_settings.knowledge_embedder}, collection: {api_settings.knowledge_collection}"
+    )
+    if api_settings.qdrant_url:
+        # Connect in the background: a vector-size mismatch with an existing collection is
+        # logged as an ERROR (get_dynamic_kb), and an unreachable Qdrant doesn't block startup.
+        async def _check_knowledge_collection():
+            try:
+                await asyncio.to_thread(knowledge_service.get_dynamic_kb)
+            except Exception as e:
+                logging.warning(f"Knowledge collection check skipped: {e}")
+
+        asyncio.create_task(_check_knowledge_collection())
+
     # Start background tasks for cache management
     try:
         # Start initial cache loading (non-blocking)

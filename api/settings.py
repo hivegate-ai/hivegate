@@ -1,11 +1,12 @@
 import os
-from typing import List
+from typing import List, Optional
 
 from pydantic import Field, field_validator
 from pydantic_core.core_schema import FieldValidationInfo
 from pydantic_settings import BaseSettings
 
 from api.services import str_to_bool
+from api.services.embedders import DEFAULT_KNOWLEDGE_COLLECTION, DEFAULT_KNOWLEDGE_EMBEDDER, parse_embedder_spec
 
 
 class ApiSettings(BaseSettings):
@@ -30,6 +31,20 @@ class ApiSettings(BaseSettings):
 
     # Qdrant port (optional)
     qdrant_port: int = Field(default=6333, description="Qdrant server port")
+
+    # Knowledge embedder (#119). Needs the embedder provider's credentials, not the chat model's.
+    knowledge_embedder: str = Field(
+        default=DEFAULT_KNOWLEDGE_EMBEDDER,
+        description="Knowledge embedder as <provider>[:<model>], e.g. openai:text-embedding-3-small",
+    )
+    knowledge_embedder_dimensions: Optional[int] = Field(
+        default=None,
+        description="Embedding size, when the provider's default is wrong for the chosen model",
+    )
+    knowledge_collection: str = Field(
+        default=DEFAULT_KNOWLEDGE_COLLECTION,
+        description="Qdrant collection for knowledge. Use a new one when changing the embedder",
+    )
 
     gemini_api_key: str = Field(default="", description="Gemini API key")
     openai_api_key: str = Field(default="", description="OpenAI API key")
@@ -78,6 +93,26 @@ class ApiSettings(BaseSettings):
             return int(port_str)
         except ValueError:
             return 6333
+
+    @field_validator("knowledge_embedder", mode="before")
+    def set_knowledge_embedder(cls, knowledge_embedder, info: FieldValidationInfo):
+        # Blank (as in .env.example) means the default; an unknown provider fails startup.
+        spec = str(knowledge_embedder or "").strip() or DEFAULT_KNOWLEDGE_EMBEDDER
+        parse_embedder_spec(spec)
+        return spec
+
+    @field_validator("knowledge_embedder_dimensions", mode="before")
+    def set_knowledge_embedder_dimensions(cls, dimensions, info: FieldValidationInfo):
+        if dimensions is None or str(dimensions).strip() == "":
+            return None
+        value = int(dimensions)
+        if value <= 0:
+            raise ValueError("KNOWLEDGE_EMBEDDER_DIMENSIONS must be a positive integer")
+        return value
+
+    @field_validator("knowledge_collection", mode="before")
+    def set_knowledge_collection(cls, knowledge_collection, info: FieldValidationInfo):
+        return str(knowledge_collection or "").strip() or DEFAULT_KNOWLEDGE_COLLECTION
 
     @field_validator("gemini_api_key", mode="before")
     def set_gemini_api_key(cls, gemini_api_key, info: FieldValidationInfo):

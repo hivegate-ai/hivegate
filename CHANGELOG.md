@@ -32,6 +32,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes every agent that uses it. An unknown or deleted id is a 400; deleting a server an
   agent still uses is a 409 naming the agents. Supervisor and container workers keep
   `worker_config.mcp_servers` (#91)
+- The knowledge embedder is configurable. `KNOWLEDGE_EMBEDDER=<provider>[:<model>]` picks any
+  agno embedder (`openai:text-embedding-3-small`, `voyageai:voyage-3`, `ollama:nomic-embed-text`,
+  `fastembed:BAAI/bge-small-en-v1.5`, ...), so knowledge ingestion and `search_knowledge_base` no
+  longer need `GOOGLE_API_KEY` on a deployment that doesn't use Google. They need the embedder
+  provider's credentials instead. `KNOWLEDGE_EMBEDDER_DIMENSIONS` sets the vector size where the
+  provider's default is wrong for the model, and `KNOWLEDGE_COLLECTION` names the Qdrant
+  collection. If an existing collection's vector size doesn't match the embedder, an error naming
+  it is logged at startup and indexing and search are refused, instead of every upsert failing;
+  chat keeps working. Each chunk records `embedding_model` and `embedding_dimensions`. Unset,
+  behaviour is unchanged: `google:gemini-embedding-001` in `unified_knowledge` (#119,
+  @visveshkhanna)
+
+### Tests
+- The two scripts in the repo root that `pytest tests/` never ran are gone (#142, @visveshkhanna).
+  `test_current_knowledge_service.py` read an attribute that no longer exists, patched the CRUD
+  functions after the service had already imported them, and swallowed every error, so it could
+  not fail; `tests/test_knowledge_service.py` covers what it meant to. `test_reproduce_issue.py`
+  needed a live server; the race it reproduced is now a unit test of the duplicate-key retry in
+  `create_user_token`
 
 ## [0.4.1] - 2026-11-15
 

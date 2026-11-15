@@ -148,6 +148,59 @@ class TestUserTokenCRUD(unittest.TestCase):
         self.assertEqual(initial_token.id, updated_token.id)
         self.assertEqual(updated_token.encrypted_token_data, "new_encrypted_data")
 
+    @patch("db.user_token_crud.get_token_encryption")
+    def test_create_user_token_concurrent_insert_updates_instead(self, mock_get_encryption):
+        """Two creates for the same user and integration race: the loser updates the winner's row.
+
+        Replaces the repo-root test_reproduce_issue.py (#142), which reproduced the old
+        "duplicate key value" error by firing concurrent POST /v2/users/{id}/tokens at a live
+        server. Here the other request's row lands between this request's lookup and its
+        insert, which is the window that error came from.
+        """
+        from sqlalchemy.orm import Query
+
+        mock_encryption = MagicMock()
+        mock_get_encryption.return_value = mock_encryption
+
+        # The other request wins: its row is committed first.
+        mock_encryption.encrypt_token_data.return_value = "winner_encrypted_data"
+        other_db = sessionmaker(bind=self.engine)()
+        winner = create_user_token(
+            db=other_db,
+            user_id=self.user_id,
+            integration_key=self.integration_key,
+            provider=self.provider,
+            token_type=self.token_type,
+            token_data=self.token_data,
+        )
+        winner_id = winner.id
+        other_db.close()
+
+        # This request looked before that commit, so its lookup found nothing.
+        real_first = Query.first
+        lookups = []
+
+        def first_misses_once(query):
+            lookups.append(query)
+            return None if len(lookups) == 1 else real_first(query)
+
+        mock_encryption.encrypt_token_data.return_value = "loser_encrypted_data"
+        with patch.object(Query, "first", first_misses_once):
+            token = create_user_token(
+                db=self.db,
+                user_id=self.user_id,
+                integration_key=self.integration_key,
+                provider=self.provider,
+                token_type=self.token_type,
+                token_data={"access_token": "newer_access_token"},
+            )
+
+        # The insert hit the unique constraint, and the retry updated the existing row.
+        self.assertEqual(len(lookups), 2)
+        self.assertEqual(token.id, winner_id)
+        self.assertEqual(token.encrypted_token_data, "loser_encrypted_data")
+        self.assertEqual(self.db.query(UserTokenDB).count(), 1)
+
     def test_create_user_token_invalid_type(self):
         """Test creating user token with invalid token type."""
         with self.assertRaises(ValueError) as context:

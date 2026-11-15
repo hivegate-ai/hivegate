@@ -345,6 +345,9 @@ Platform-specific deployment manifests and guides live under `deploy/`:
 | `BRIGHT_DATA_WEB_UNLOCKER_ZONE` | No | Bright Data Web Unlocker zone (default: `web_unlocker1`) |
 | `BRIGHT_DATA_SERP_ZONE` | No | Bright Data SERP zone (default: `serp_api1`) |
 | `QDRANT_URL` | No | Qdrant vector database URL |
+| `KNOWLEDGE_EMBEDDER` | No | Default: `google:gemini-embedding-001`. The embedder for knowledge ingestion and `search_knowledge_base`, as `<provider>[:<model>]`, e.g. `openai:text-embedding-3-small`, `voyageai:voyage-3`, `ollama:nomic-embed-text`, `fastembed:BAAI/bge-small-en-v1.5`. It needs that provider's credentials (`GOOGLE_API_KEY`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `OLLAMA_HOST`, ...), not the chat model's. `fastembed`, `voyageai` and the other optional providers need their package installed |
+| `KNOWLEDGE_EMBEDDER_DIMENSIONS` | No | The embedding size, when the provider's default is wrong for the model: Ollama assumes 4096, and OpenAI leaves Qdrant at 1536, which is wrong for `text-embedding-3-large` (3072) |
+| `KNOWLEDGE_COLLECTION` | No | Default: `unified_knowledge`. The Qdrant collection. A collection keeps the vector size it was created with, so switching embedders means a new collection and re-ingesting; a mismatch is logged at startup and indexing and search are refused |
 | `SECRET_TOKEN_ENC_KEY` | For OAuth tokens | Fernet key that encrypts stored OAuth tokens. Storing a token fails without it. Generate one with `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` |
 | `PRICING_OVERRIDES` | No | JSON of per-model prices for [usage metering](#usage-and-cost) |
 
