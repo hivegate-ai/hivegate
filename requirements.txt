@@ -111,7 +111,7 @@ pydantic-extra-types==2.11.1
 pydantic-settings==2.16.2
 pygments==2.21.0
 pyjwt==2.15.1
-pypdf==6.21.4
+pypdf==7.0.1
 pyperclip==1.11.0
 python-dateutil==4.0.0
 python-docx==1.2.0
