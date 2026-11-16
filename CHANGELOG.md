@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   toolkit name in `tools` is now a 400 (#88, @visveshkhanna)
 
 ### Fixed
+- The console CLI (`cli/agent_cli.py`) now asks for approval on every call the gateway marks
+  `requires_confirmation`, instead of only the tools in its own hardcoded list, so Tasks writes
+  get a prompt. `run_claude_code` and `run_managed_agent` were never in that list, and their runs
+  used to sit paused with no prompt; they now get the generic approval dialog too. The generic
+  editor keeps object arguments (nested values and `null`s) by editing them as JSON, a paused
+  batch is submitted once instead of being prompted again after every commit, and in streaming
+  mode every pending call in the batch is prompted, not only the last one (#196)
 - Chat agents now get agno's generated system prompt after their stored prompt: the current
   date and time in the agent's timezone, the list of attached skills, memory guidance, toolkit
   and knowledge-search instructions, and the markdown instruction. The stored prompt used to be
