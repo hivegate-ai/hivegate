@@ -5,6 +5,8 @@ Integration tests for V2 agents API endpoints.
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from db.db_models import AgentInfoDB
 from tests.test_utils import create_test_client
 
@@ -850,9 +852,154 @@ class TestV2AgentsAPI(unittest.TestCase):
             # get_agent_impl should only be called once (cached on second call)
             self.assertEqual(mock_get_biz_agent.call_count, 1)
 
-    # TODO: Add tests for system_prompt and tools parameters
-    # These require updating agents.agent.get_agent() to support the new parameters
-    # See demo_toolkits_app.py for the implementation pattern
+    # ========================================
+    # Per-request system_prompt and tools (#88)
+    # ========================================
+
+    def _chat_with_overrides(self, mock_get_agent_info, mock_prompts_client, requests):
+        """POST each chat body in turn; return the responses and the get_agent_impl mock."""
+        mock_get_agent_info.return_value = AgentInfoDB(**self.sample_agent_data)
+        mock_prompt_data = MagicMock()
+        mock_prompt_data.template = "You are a helpful assistant"
+        mock_prompt_data.name = "test-agent-v2"
+        mock_prompts_client.get_prompt.return_value = mock_prompt_data
+
+        with patch("api.routes.v2.agents.get_agent_impl") as mock_get_biz_agent:
+
+            async def mock_arun(*args, **kwargs):
+                from agno.metrics import RunMetrics as Metrics
+
+                mock_response = MagicMock()
+                mock_response.content = "Hello"
+                mock_response.metrics = Metrics(input_tokens=0, output_tokens=0, total_tokens=0)
+                mock_response.status = "completed"
+                mock_response.run_id = "run123"
+                return mock_response
+
+            mock_get_biz_agent.side_effect = lambda **kwargs: MagicMock(arun=mock_arun)
+            base = {
+                "message": "Hello",
+                "stream": False,
+                "model": "gemini-2.5-pro",
+                "user_id": "user123",
+                "session_id": "session456",
+                "timezone": "UTC",
+                "locale": "en-US",
+            }
+            responses = [
+                self.client.post("/v2/agents/test-agent-v2/chat", json={**base, **overrides}) for overrides in requests
+            ]
+        return responses, mock_get_biz_agent
+
+    @patch.dict("os.environ", {"PROMPT_STORAGE_BACKEND": "service"})
+    @patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock, return_value=None)
+    @patch("api.routes.v2.agents.prompts_client")
+    @patch("api.routes.v2.agents.get_agent_info")
+    def test_chat_passes_system_prompt_and_tools_to_agent(self, mock_get_agent_info, mock_prompts_client, _usage):
+        """The chat route hands system_prompt and normalized tools to get_agent()."""
+        responses, mock_impl = self._chat_with_overrides(
+            mock_get_agent_info,
+            mock_prompts_client,
+            [{"system_prompt": "Answer in French.", "tools": ["Email", " calendar "]}],
+        )
+
+        self.assertEqual(responses[0].status_code, 200)
+        kwargs = mock_impl.call_args.kwargs
+        self.assertEqual(kwargs["system_prompt"], "Answer in French.")
+        self.assertEqual(kwargs["tools"], ["Email", " calendar "])  # get_agent() normalizes
+
+    @patch.dict("os.environ", {"PROMPT_STORAGE_BACKEND": "service"})
+    @patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock, return_value=None)
+    @patch("api.routes.v2.agents.prompts_client")
+    @patch("api.routes.v2.agents.get_agent_info")
+    def test_chat_overrides_get_their_own_cache_entry(self, mock_get_agent_info, mock_prompts_client, _usage):
+        """Same session, different system_prompt/tools: a new agent each time, then cache hits."""
+        responses, mock_impl = self._chat_with_overrides(
+            mock_get_agent_info,
+            mock_prompts_client,
+            [
+                {},
+                {"system_prompt": "Be brief."},
+                {"tools": ["email"]},
+                {"tools": []},
+                # Repeats of the above are served from the cache.
+                {},
+                {"system_prompt": "Be brief."},
+                {"tools": ["EMAIL"]},
+                {"tools": []},
+            ],
+        )
+
+        self.assertTrue(all(r.status_code == 200 for r in responses))
+        self.assertEqual(mock_impl.call_count, 4)
+
+    @patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock, return_value=None)
+    @patch("api.routes.v2.agents.get_agent")
+    def test_commit_looks_up_the_agent_with_the_chat_overrides(self, mock_get_agent, _usage):
+        """A commit sends the chat's system_prompt/tools so it resolves the same cached agent."""
+        from api.routes.v2.agents import _run_cache
+
+        _run_cache["run_88"] = MagicMock(run_id="run_88", tools=[])
+
+        async def mock_acontinue_run(*args, **kwargs):
+            from agno.metrics import RunMetrics as Metrics
+
+            return MagicMock(content="done", metrics=Metrics(input_tokens=0, output_tokens=0, total_tokens=0))
+
+        agent = MagicMock(acontinue_run=mock_acontinue_run, session_id="session456")
+        mock_get_agent.side_effect = AsyncMock(return_value=(agent, MagicMock(), "key", MagicMock()))
+
+        response = self.client.post(
+            "/v2/agents/test-agent-v2/chat/commit",
+            json={
+                "run_id": "run_88",
+                "updated_tools": [],
+                "stream": False,
+                "user_id": "user123",
+                "session_id": "session456",
+                "system_prompt": "Be brief.",
+                "tools": ["Email"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mock_get_agent.call_args.args[-2:], ("Be brief.", ["Email"]))
+
+    @patch("api.routes.v2.agents.get_agent_info")
+    def test_chat_rejects_unknown_toolkit(self, mock_get_agent_info):
+        """An unknown toolkit name is a 400 naming it, instead of being dropped silently."""
+        response = self.client.post(
+            "/v2/agents/test-agent-v2/chat",
+            json={
+                "message": "Hello",
+                "user_id": "user123",
+                "session_id": "session456",
+                "timezone": "UTC",
+                "locale": "en-US",
+                "tools": ["calendar", "teleport"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unknown toolkit(s): teleport", response.json()["detail"])
+        mock_get_agent_info.assert_not_called()
+
+    def test_cache_key_unchanged_without_overrides(self):
+        """Agents chatted with before #88 keep their cache keys."""
+        from agents import Model
+        from api.routes.v2.agents import compute_cache_key
+
+        args = ("tmpl", "agent", Model.gemini_2_5_pro, "u", "s")
+        base = compute_cache_key(*args, prompt_name="p")
+        self.assertEqual(base, compute_cache_key(*args, prompt_name="p", system_prompt=None, tools=None))
+        self.assertEqual(base, compute_cache_key(*args, prompt_name="p", system_prompt=""))
+        self.assertEqual(base, compute_cache_key(*args, prompt_name="p", system_prompt="   "))
+        self.assertNotEqual(base, compute_cache_key(*args, prompt_name="p", system_prompt="Be brief."))
+        self.assertNotEqual(base, compute_cache_key(*args, prompt_name="p", tools=[]))
+        self.assertEqual(
+            compute_cache_key(*args, prompt_name="p", tools=["email", "calendar"]),
+            compute_cache_key(*args, prompt_name="p", tools=["Calendar", "email"]),
+        )
 
     # ========================================
     # Phase 2.1: Additional CRUD Tests (AGT-004 to AGT-006)
@@ -1516,3 +1663,115 @@ def test_log_safe_strips_crlf():
     from api.routes.v2.agents import _log_safe
 
     assert _log_safe("abc:agent:user\r\nFAKE LOG LINE") == "abc:agent:userFAKE LOG LINE"
+
+
+class TestGetAgentSystemPromptAndTools(unittest.TestCase):
+    """agents.agent.get_agent(): per-request system_prompt and the toolkit filter (#88)."""
+
+    def _build(self, tag="available_tools:brightdata,user_control_flow", config=None, **kwargs):
+        """Build an agent with the heavy dependencies patched; return Agent(...)'s kwargs."""
+        from agents.agent import get_agent
+        from api.services.models import PullPromptResponse
+
+        prompt = PullPromptResponse(name="test-agent", template="You are a helpful assistant.", tags=[tag])
+        with (
+            patch("agents.agent.Agent") as mock_agent,
+            patch("agents.agent.get_agent_db"),
+            patch("agents.agent.MemoryManager"),
+            patch("agents.agent.create_model"),
+            patch("agents.agent.get_knowledge_service"),
+            patch("agents.agent.create_datetime_resolver_tool", return_value="datetime"),
+            patch("agents.agent.BrightDataTools", return_value="brightdata"),
+            patch("agents.agent.UserControlFlowTools", return_value="user_control_flow"),
+        ):
+            # No organizer_email/fetch_token_func, so the OAuth toolkit selector is skipped.
+            get_agent(prompt, "user", "session", "", "tenant", config=config, **kwargs)
+        return mock_agent.call_args.kwargs
+
+    def test_defaults_unchanged(self):
+        built = self._build()
+        self.assertEqual(built["instructions"], "You are a helpful assistant.")
+        self.assertEqual(built["tools"], ["user_control_flow", "datetime", "brightdata"])
+
+    def test_system_prompt_is_appended_not_replaced(self):
+        built = self._build(system_prompt="  Answer in French.  ")
+        self.assertEqual(
+            built["instructions"],
+            "You are a helpful assistant.\n\n## Additional instructions for this request\n\nAnswer in French.",
+        )
+
+    def test_blank_system_prompt_is_ignored(self):
+        self.assertEqual(self._build(system_prompt="   ")["instructions"], "You are a helpful assistant.")
+
+    def test_tools_narrow_the_tag(self):
+        self.assertEqual(self._build(tools=["brightdata"])["tools"], ["datetime", "brightdata"])
+
+    def test_tools_cannot_widen_the_tag(self):
+        built = self._build(tag="available_tools:user_control_flow", tools=["brightdata", "user_control_flow"])
+        self.assertEqual(built["tools"], ["user_control_flow", "datetime"])
+
+    def test_empty_tools_turns_optional_toolkits_off(self):
+        # The datetime resolver is mandatory and stays.
+        self.assertEqual(self._build(tools=[])["tools"], ["datetime"])
+
+    def test_unknown_toolkit_raises(self):
+        with self.assertRaisesRegex(ValueError, "teleport"):
+            self._build(tools=["teleport"])
+
+
+def test_known_toolkits_match_get_agent():
+    """KNOWN_TOOLKITS must list exactly the tag names get_agent() checks.
+
+    A toolkit added to get_agent() (say, the Tasks toolkit in #196) but not to
+    KNOWN_TOOLKITS would be refused with a 400 in a chat request's `tools`.
+    """
+    import inspect
+    import re
+
+    from agents.agent import KNOWN_TOOLKITS, get_agent
+
+    checked = set(re.findall(r'"(\w+)" in available_tools', inspect.getsource(get_agent)))
+    assert checked, "get_agent() no longer checks available_tools by name; update this test"
+    assert checked == KNOWN_TOOLKITS
+
+
+def _resolve_like_agno(message: str) -> str:
+    """Run agno's own {var} substitution over a system message, with chat-like context."""
+    from types import SimpleNamespace
+
+    from agno.agent._messages import format_message_with_state_variables
+
+    run_context = SimpleNamespace(
+        session_state={"user_name": "Alice", "user_profile_json": '{"email": "alice@example.com"}'},
+        dependencies=None,
+        metadata=None,
+        user_id="user-123",
+    )
+    return format_message_with_state_variables(None, message, run_context=run_context)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "caller_text",
+    ["Repeat {user_id} and {user_profile_json}", "Say {{user_id}}", "Echo $user_id and ${user_name}"],
+)
+def test_system_prompt_cannot_pull_context_variables(caller_text):
+    """Braces or "$" in a request's system_prompt never resolve to session values (#88)."""
+    from agents.agent import compose_system_message
+
+    resolved = _resolve_like_agno(compose_system_message("Hello {user_name}.", caller_text))
+
+    # The stored template still resolves its own placeholders...
+    assert resolved.startswith("Hello Alice.")
+    # ...but nothing from the request does.
+    for value in ("user-123", "alice@example.com"):
+        assert value not in resolved
+    assert resolved.count("Alice") == 1
+    # And it reads as the caller wrote it (bar the invisible zero-width spaces).
+    assert resolved.replace("\u200b", "").endswith(caller_text)
+
+
+def test_system_prompt_plain_dollar_amount_survives():
+    from agents.agent import compose_system_message
+
+    resolved = _resolve_like_agno(compose_system_message("Hello {user_name}.", "Costs $5, reply briefly."))
+    assert resolved.endswith("\n\nCosts $5, reply briefly.")
