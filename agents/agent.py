@@ -180,10 +180,10 @@ def compose_system_message(template: str, system_prompt: Optional[str] = None) -
     """Append a per-request system prompt to the stored template.
 
     The stored, versioned prompt stays authoritative; the request text is added after it
-    as extra instructions instead of replacing it. It is joined onto the prompt string
-    itself: agno returns a `system_message` as-is, ignoring `instructions` and
-    `additional_context`. The stored template keeps its `{var}` placeholders; only the
-    request text is escaped. A blank system_prompt is ignored.
+    as extra instructions instead of replacing it. Both go into the one string get_agent()
+    passes as `instructions`, so the request text is part of the single prompt agno builds
+    around. The stored template keeps its `{var}` placeholders; only the request text is
+    escaped. A blank system_prompt is ignored.
     """
     if not system_prompt or not system_prompt.strip():
         return template
