@@ -72,8 +72,11 @@ class RequirementsForTest(unittest.TestCase):
 class _ScriptedClaude:
     """Anthropic client stub: first asks for the tool, then answers in text."""
 
-    def __init__(self):
+    def __init__(self, *tool_calls: ToolUseBlock):
         self.calls = 0
+        self.tool_calls = list(tool_calls) or [
+            ToolUseBlock(type="tool_use", id="toolu_1", name="delete_budget", input={"budget_id": 7})
+        ]
 
     def create(self, **kwargs):
         self.calls += 1
@@ -83,7 +86,7 @@ class _ScriptedClaude:
                 type="message",
                 role="assistant",
                 model="claude-sonnet-5-5",
-                content=[ToolUseBlock(type="tool_use", id="toolu_1", name="delete_budget", input={"budget_id": 7})],
+                content=self.tool_calls,
                 stop_reason="tool_use",
                 stop_sequence=None,
                 usage=Usage(input_tokens=5, output_tokens=5),
