@@ -1688,26 +1688,20 @@ class TestGetAgentSystemPromptAndTools(unittest.TestCase):
             get_agent(prompt, "user", "session", "", "tenant", config=config, **kwargs)
         return mock_agent.call_args.kwargs
 
-    @staticmethod
-    def _prompt(built):
-        # The stored prompt reaches agno as `system_message` today; #232 moves it to
-        # `instructions`. Either way it is the prompt string this PR composes.
-        return built.get("instructions") or built["system_message"]
-
     def test_defaults_unchanged(self):
         built = self._build()
-        self.assertEqual(self._prompt(built), "You are a helpful assistant.")
+        self.assertEqual(built["instructions"], "You are a helpful assistant.")
         self.assertEqual(built["tools"], ["user_control_flow", "datetime", "brightdata"])
 
     def test_system_prompt_is_appended_not_replaced(self):
         built = self._build(system_prompt="  Answer in French.  ")
         self.assertEqual(
-            self._prompt(built),
+            built["instructions"],
             "You are a helpful assistant.\n\n## Additional instructions for this request\n\nAnswer in French.",
         )
 
     def test_blank_system_prompt_is_ignored(self):
-        self.assertEqual(self._prompt(self._build(system_prompt="   ")), "You are a helpful assistant.")
+        self.assertEqual(self._build(system_prompt="   ")["instructions"], "You are a helpful assistant.")
 
     def test_tools_narrow_the_tag(self):
         self.assertEqual(self._build(tools=["brightdata"])["tools"], ["datetime", "brightdata"])
@@ -1723,6 +1717,22 @@ class TestGetAgentSystemPromptAndTools(unittest.TestCase):
     def test_unknown_toolkit_raises(self):
         with self.assertRaisesRegex(ValueError, "teleport"):
             self._build(tools=["teleport"])
+
+
+def test_known_toolkits_match_get_agent():
+    """KNOWN_TOOLKITS must list exactly the tag names get_agent() checks.
+
+    A toolkit added to get_agent() (say, the Tasks toolkit in #196) but not to
+    KNOWN_TOOLKITS would be refused with a 400 in a chat request's `tools`.
+    """
+    import inspect
+    import re
+
+    from agents.agent import KNOWN_TOOLKITS, get_agent
+
+    checked = set(re.findall(r'"(\w+)" in available_tools', inspect.getsource(get_agent)))
+    assert checked, "get_agent() no longer checks available_tools by name; update this test"
+    assert checked == KNOWN_TOOLKITS
 
 
 def _resolve_like_agno(message: str) -> str:

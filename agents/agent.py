@@ -124,6 +124,9 @@ def extract_available_tools(response: PullPromptResponse) -> set[str]:
 
 # Optional toolkits an `available_tools:` tag can enable. The datetime resolver is
 # always on and MCP tools are configured separately, so neither is listed here.
+# Keep this in step with the `"<name>" in available_tools` checks in get_agent(): a
+# toolkit added there but not here is a 400 in a chat request's `tools`.
+# tests/v2/test_agents.py::test_known_toolkits_match_get_agent fails when they drift.
 KNOWN_TOOLKITS = frozenset({"brightdata", "calendar", "contacts", "drive", "email", "user_control_flow"})
 
 
