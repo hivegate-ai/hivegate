@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import httpx
 import pytest
-import requests  # noqa: F401  (imported before the CLI so its patch below reaches the same module)
+import requests
 
 UPDATE = {"list_id": "opaque", "task_id": "one", "changes": {"notes": None, "title": "null"}}
 DELETE = {"list_id": "opaque", "task_id": "two"}
@@ -86,7 +86,8 @@ def _run(monkeypatch, client, stream, commit_reply, paused=PAUSED):
             submitted.append(json)
             return SimpleNamespace(status_code=200, json=lambda: commit_reply)
 
-        monkeypatch.setattr("requests.post", post)
+        # The CLI's own module: imported at the top, so _client's patch.dict keeps it in sys.modules
+        monkeypatch.setattr(requests, "post", post)
         client.handle_single_response(paused)
     return submitted
 
