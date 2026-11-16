@@ -426,7 +426,8 @@ HiveGate is built in the open, and these people have contributed to it:
   server, which ones are safe in read-only mode and which should always need approval (#204),
   mapped the OAuth setup of Gamma's and Zite's hosted MCP servers (#202, #203), and made the
   knowledge embedder configurable with `KNOWLEDGE_EMBEDDER`, so knowledge works without a Google
-  key (#238)
+  key (#238), and made chat honour a request's `system_prompt` and `tools` while agno builds the
+  full system prompt around the stored one (#237)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
