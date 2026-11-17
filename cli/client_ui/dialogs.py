@@ -139,13 +139,13 @@ class DialogBuilder:
                         "default": value,
                     }
                 )
-            elif isinstance(value, list):
-                # For lists, show as JSON string for editing
+            elif isinstance(value, (list, dict)):
+                # For lists and objects, show as JSON for editing (keeps nested values and nulls)
                 questions.append(
                     {
                         "type": "input",
                         "name": key,
-                        "message": f"{key} (JSON list):",
+                        "message": f"{key} (JSON):",
                         "default": json.dumps(value, ensure_ascii=False),
                     }
                 )
@@ -176,8 +176,8 @@ class DialogBuilder:
             else:
                 answer = inquirer.text(message=q["message"], default=q["default"]).execute()
 
-            # Parse JSON lists back
-            if isinstance(tool_args.get(q["name"]), list) and isinstance(answer, str):
+            # Parse JSON lists and objects back
+            if isinstance(tool_args.get(q["name"]), (list, dict)) and isinstance(answer, str):
                 try:
                     answer = json.loads(answer)
                 except json.JSONDecodeError:
