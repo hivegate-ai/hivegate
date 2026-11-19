@@ -198,6 +198,7 @@ class DialogBuilder:
             message="Choose action:",
             choices=[
                 Choice(value="confirm", name=confirm_text),
+                Choice(value="decline", name="⊖ Decline This Tool"),
                 Choice(value="skip", name="⊘ Skip This Tool"),
                 Separator(),
                 Choice(value="cancel", name="✗ Cancel All"),
@@ -205,10 +206,11 @@ class DialogBuilder:
             default="confirm",
         ).execute()
 
-        return {
-            "action": action,
-            "edited_args": edited_args,
-        }
+        result: Dict[str, Any] = {"action": action, "edited_args": edited_args}
+        if action == "decline":
+            # The gateway passes the note to the model as the declined call's result
+            result["note"] = inquirer.text(message="Reason for declining (optional):", default="").execute()
+        return result
 
     # ---------------------------
     # Contacts Dialogs

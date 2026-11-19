@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of failing when chat connects
 
 ### Added
+- The console CLI's generic confirmation dialog has a **Decline** choice, with an optional
+  reason. It commits the call with `confirmed: false` and the reason as `confirmation_note`, so
+  a paused run that is still cached resumes and the model replies to the refusal. A batch in
+  which every call is declined is now committed. Skip still leaves a call undecided, and a batch
+  with only skipped calls is not committed (#245)
 - MCP server registry: `/v2/mcp-servers` registers an HTTP MCP server once (id, URL, transport,
   optional static headers). Header values are encrypted at rest and responses list only their
   names (#91)
