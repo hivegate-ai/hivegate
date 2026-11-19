@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be accepted and ignored, so a client that already sends them will see them apply. An unknown
   toolkit name in `tools` is now a 400 (#88, @visveshkhanna)
 
+### Changed
+- Declining every call in a paused batch now resumes the run, as declining only some of them
+  already did. The agent and team commit routes used to answer `"Tool execution cancelled by
+  user."` with `status: cancelled` and never resume the run, so the model was not told and did
+  not reply. Now the declined calls don't run, the model is told they were declined (with the
+  `confirmation_note`, if any), and the commit returns the model's reply, streamed when `stream`
+  is true for agents. A client that relied on `cancelled` for a declined batch will now get a
+  completed run. Like any commit, a declined one now calls the model, so it is metered, and a
+  model error leaves the run paused for a retry. A commit that declines every call for a run
+  that is no longer cached still gets the `cancelled` reply (#245)
+
 ### Fixed
 - The console CLI (`cli/agent_cli.py`) now asks for approval on every call the gateway marks
   `requires_confirmation`, instead of only the tools in its own hardcoded list, so Tasks writes

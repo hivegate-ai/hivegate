@@ -1468,7 +1468,7 @@ class TestV2AgentsAPI(unittest.TestCase):
     @patch("api.routes.v2.agents.record_usage", new_callable=AsyncMock)
     @patch("api.routes.v2.agents.get_agent")
     def test_agt_064_commit_rejected_tools(self, mock_get_agent, mock_store_token):
-        """AGT-064: Commit with all tools rejected."""
+        """AGT-064: Commit with all tools rejected resumes the cached run, so the model replies."""
         mock_store_token.return_value = None
 
         # Set up a paused run
@@ -1537,8 +1537,28 @@ class TestV2AgentsAPI(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        # When all tools rejected, agent returns cancelled status
+        # The run resumes like any other commit, and the model's reply comes back.
+        self.assertEqual(data["status"], "completed")
+        self.assertEqual(data["content"], "I understand you don't want to schedule that meeting.")
+        self.assertNotIn("run_reject_123", _run_cache)
+
+    @patch.dict("api.routes.v2.agents._run_cache", {}, clear=True)
+    def test_agt_065_commit_rejected_tools_for_an_expired_run(self):
+        """AGT-065: Commit with all tools rejected for a run no longer cached is cancelled, not a 410."""
+        commit_request = {
+            "run_id": "run_gone",
+            "updated_tools": [{"tool_call_id": "call_1", "confirmed": False}],
+            "stream": True,
+            "user_id": "user123",
+            "session_id": "session456",
+        }
+
+        response = self.client.post("/v2/agents/test-agent-v2/chat/commit", json=commit_request)
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
         self.assertEqual(data["status"], "cancelled")
+        self.assertEqual(data["content"], "Tool execution cancelled by user.")
 
 
 class TestParseResult(unittest.TestCase):
