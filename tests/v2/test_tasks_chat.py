@@ -43,10 +43,12 @@ PATCHED = ("PATCH", "/tasks/v1/lists/list/tasks/task", {"title": "null", "notes"
 def _serve_tasks_chat(monkeypatch, *tool_calls):
     """Route cached native chat through real agno and TasksToolkit to a mocked Google Tasks API.
 
-    The scripted model proposes `tool_calls` once. Returns the provider HTTP client and the
-    (method, path, body) of every request that reached the provider.
+    The scripted model proposes `tool_calls` once. Returns the provider HTTP client, the
+    (method, path, body) of every request that reached the provider, and the keyword arguments
+    of every request that reached the model.
     """
     dispatched = []
+    model_requests = []
 
     def task_request(request):
         assert request.headers["Authorization"] == "Bearer synthetic-chat-token"
@@ -64,6 +66,7 @@ def _serve_tasks_chat(monkeypatch, *tool_calls):
     scripted = _ScriptedClaude(*tool_calls)
 
     async def create(**kwargs):
+        model_requests.append(kwargs)
         if not scripted.calls:
             tools = {item["name"]: item for item in kwargs["tools"]}
             schema = tools["update_task"]["input_schema"]
@@ -110,14 +113,14 @@ def _serve_tasks_chat(monkeypatch, *tool_calls):
     monkeypatch.setattr(agents, "record_usage", AsyncMock(return_value=None))
     monkeypatch.setattr(agents, "_agent_cache", {})
     monkeypatch.setattr(agents, "_run_cache", {})
-    return provider_http, dispatched
+    return provider_http, dispatched, model_requests
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("approve", [True, False])
 @pytest.mark.parametrize("stream", [True, False])
 async def test_chat_approval_with_real_agno_and_tasks_toolkit(app, monkeypatch, approve, stream):
-    provider_http, dispatched = _serve_tasks_chat(
+    provider_http, dispatched, model_requests = _serve_tasks_chat(
         monkeypatch, ToolUseBlock(type="tool_use", id="toolu_update", name="update_task", input=UPDATE)
     )
     request = {**OWNER, "stream": stream}
@@ -140,20 +143,36 @@ async def test_chat_approval_with_real_agno_and_tasks_toolkit(app, monkeypatch, 
 
             reply = await gateway.post(
                 CHAT + "/commit",
-                json={**request, "run_id": paused["run_id"], "updated_tools": [{**tool, "confirmed": approve}]},
+                json={
+                    **request,
+                    "run_id": paused["run_id"],
+                    "updated_tools": [{**tool, "confirmed": approve, "confirmation_note": "Not this one"}],
+                },
             )
             assert reply.status_code == 200, reply.text
-            if stream and approve:
+            # A declined call resumes the run too: the model hears about it and replies.
+            if stream:
                 assert "RunCompleted" in reply.text
             else:
-                assert reply.json()["status"] == ("completed" if approve else "cancelled")
+                assert reply.json()["status"] == "completed"
+                assert reply.json()["content"] == "done"
 
     assert dispatched == ([PATCHED] if approve else [])
+    [result] = [
+        block
+        for message in model_requests[-1]["messages"]
+        if isinstance(message["content"], list)
+        for block in message["content"]
+        if block.get("type") == "tool_result"
+    ]
+    assert result["tool_use_id"] == "toolu_update"
+    # The model is told why the call didn't run.
+    assert (result["content"] == "Not this one") is (not approve)
 
 
 @pytest.mark.asyncio
 async def test_a_call_skipped_in_an_approved_batch_never_reaches_the_provider(app, monkeypatch):
-    provider_http, dispatched = _serve_tasks_chat(
+    provider_http, dispatched, _ = _serve_tasks_chat(
         monkeypatch,
         ToolUseBlock(type="tool_use", id="toolu_update", name="update_task", input=UPDATE),
         ToolUseBlock(type="tool_use", id="toolu_delete", name="delete_task", input={"list_id": "list", "task_id": "x"}),
