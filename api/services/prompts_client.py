@@ -65,11 +65,13 @@ class PromptsServiceClient:
         self.service_key_path = service_account_key_path()
         self.prompts_service_url = os.environ.get("SERVICE_PROMPTS")
 
-        if not os.path.exists(self.service_key_path):
-            logging.warning(f"Service account file not found at {self.service_key_path}")
-
+        # SERVICE_PROMPTS is optional. Leaving it unset turns the prompts service off, which is
+        # not an error, so say so once here and keep the per-request paths quiet (#137). A set
+        # URL with no service account file is a real misconfiguration and still warns.
         if not self.prompts_service_url:
-            logging.warning("SERVICE_PROMPTS environment variable not set")
+            logging.info("Prompts service disabled: SERVICE_PROMPTS is not set")
+        elif not os.path.exists(self.service_key_path):
+            logging.warning(f"Service account file not found at {self.service_key_path}")
 
     def _is_configured(self) -> bool:
         """Check if the client is properly configured"""
@@ -92,7 +94,7 @@ class PromptsServiceClient:
             return prompts_list_cache["all"]
 
         if not self._is_configured():
-            logging.error("PromptsServiceClient not properly configured")
+            logging.debug("PromptsServiceClient not configured, skipping")
             return []
 
         if not self.prompts_service_url:
@@ -144,7 +146,7 @@ class PromptsServiceClient:
         record_cache_miss(name)
 
         if not self._is_configured():
-            logging.error("PromptsServiceClient not properly configured")
+            logging.debug("PromptsServiceClient not configured, skipping")
             return None
 
         try:
@@ -486,7 +488,7 @@ class PromptsServiceClient:
             bool: True if successful, False otherwise
         """
         if not self._is_configured():
-            logging.error("PromptsServiceClient not properly configured")
+            logging.debug("PromptsServiceClient not configured, skipping")
             return False
 
         try:
@@ -537,7 +539,7 @@ class PromptsServiceClient:
             bool: True if successful, False otherwise
         """
         if not self._is_configured():
-            logging.error("PromptsServiceClient not properly configured")
+            logging.debug("PromptsServiceClient not configured, skipping")
             return False
 
         try:

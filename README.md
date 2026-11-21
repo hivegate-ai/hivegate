@@ -265,6 +265,7 @@ The `toolkits/` package provides Agno agent toolkits for external service integr
 | EmailToolkit | Gmail, Outlook | send_email, search_emails, create_draft |
 | ContactsToolkit | Google Contacts, Microsoft Contacts | create_contact, search_contacts, list_contacts |
 | DriveToolkit | Google Drive, OneDrive | list_files, get_file_info, read_file |
+| TasksToolkit | Google Tasks, Microsoft To Do | list_tasks, create_task, complete_task |
 
 All toolkits support:
 - Confirmation-based workflow (user reviews before execution)
@@ -416,8 +417,11 @@ HiveGate is built in the open, and these people have contributed to it:
   delete the session and its runs, instead of reporting success and keeping them (#161), and
   made a failed model call return an error (502, or an SSE `error` event when streaming)
   instead of a 200 with the provider's error as the reply (#205), and started the Tasks toolkit:
-  the shared task models and provider protocol (#219), the Google Tasks provider (#221) and the
-  Microsoft To Do provider (#224)
+  the shared task models and provider protocol (#219), the Google Tasks provider (#221), the
+  Microsoft To Do provider (#224), the Tasks service and toolkit (#231), Tasks in native chat
+  (#241) and Tasks approvals in the console CLI (#251), and made reconnecting an integration
+  evict the stale cached token and keep raw OAuth errors out of refresh failures (#230), and
+  made declining every call in a paused run resume it so the model can reply (#254)
 - [@arpitkjaiswal](https://github.com/arpitkjaiswal) — documented the Bright Data toolkit's three
   settings in the README's Environment Variables table (#147)
 - [@rayulumukku](https://github.com/rayulumukku) — made a chat agent with an MCP server it can't
@@ -426,7 +430,8 @@ HiveGate is built in the open, and these people have contributed to it:
   server, which ones are safe in read-only mode and which should always need approval (#204),
   mapped the OAuth setup of Gamma's and Zite's hosted MCP servers (#202, #203), and made the
   knowledge embedder configurable with `KNOWLEDGE_EMBEDDER`, so knowledge works without a Google
-  key (#238)
+  key (#238), and made chat honour a request's `system_prompt` and `tools` while agno builds the
+  full system prompt around the stored one (#237)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.

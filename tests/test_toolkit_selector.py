@@ -280,5 +280,45 @@ class TestMultiToolkitSelector(unittest.TestCase):
         self.assertEqual(mock_agent.set_tools.call_count, 2)
 
 
+def _select_tasks(user_id, connected, tools_filter=None):
+    from types import SimpleNamespace
+
+    from toolkits.tasks import TasksToolkit
+
+    candidates = TasksToolkit.provider_candidates(user_id, lambda user, key: None)
+    hook = create_multi_toolkit_selector(
+        user_id=user_id,
+        timezone="UTC",
+        base_tools=[],
+        tools_filter=tools_filter,
+        toolkit_candidates={"tasks": candidates},
+    )
+    agent = SimpleNamespace(set_tools=MagicMock())
+    with patch("api.routes.v2.agents.has_access_tokens_batch") as has_tokens:
+        has_tokens.side_effect = lambda user, keys: {key: key in connected.get(user, ()) for key in keys}
+        hook(agent, None)
+        [[user, keys], _] = has_tokens.call_args
+    assert (user, keys[-2:]) == (user_id, ["google_tasks", "microsoft_todo"])
+    if not agent.set_tools.called:
+        return []
+    [[tools], _] = agent.set_tools.call_args
+    return [(t.user_id, t.service_name, t.auth) for t in tools]
+
+
+def test_selector_picks_each_users_tasks_provider_in_order():
+    connected = {"alice": ("google_tasks", "microsoft_todo"), "bob": ("microsoft_todo",)}
+
+    assert _select_tasks("alice", connected) == [("alice", "google_tasks", True)]
+    assert _select_tasks("bob", connected) == [("bob", "microsoft_todo", True)]
+    assert _select_tasks("carol", connected) == [("carol", "tasks", False)]
+
+
+def test_selector_applies_tools_filter_to_candidate_groups():
+    assert _select_tasks("alice", {"alice": ("google_tasks",)}, tools_filter=["Calendar"]) == []
+    assert _select_tasks("alice", {"alice": ("google_tasks",)}, tools_filter=["TASKS"]) == [
+        ("alice", "google_tasks", True)
+    ]
+
+
 if __name__ == "__main__":
     unittest.main()

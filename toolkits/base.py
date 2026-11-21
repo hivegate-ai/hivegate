@@ -24,8 +24,12 @@ class BaseToolkit(Toolkit, ABC):
     Provides common functionality for toolkit identification, comparison,
     authentication, and error handling.
 
-    All toolkits (Calendar, Contacts, Drive, Email) inherit from this class.
+    All toolkits (Calendar, Contacts, Drive, Email, Tasks) inherit from this class.
     """
+
+    # Whether the direct /toolkit/run route may call this toolkit's methods. A toolkit whose
+    # writes rely on the chat approval pause sets this to False.
+    allow_direct_invocation: bool = True
 
     def __init__(
         self,

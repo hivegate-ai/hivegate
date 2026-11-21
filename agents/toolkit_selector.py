@@ -1,8 +1,10 @@
 import logging
+from collections.abc import Mapping, Sequence
 from typing import Optional
 
 from agno.tools import tool
 
+from toolkits.base import BaseToolkit
 from toolkits.calendar import CalendarToolkit
 from toolkits.contacts import ContactsToolkit
 from toolkits.drive import DriveToolkit
@@ -63,6 +65,7 @@ def create_multi_toolkit_selector(
     email_google: Optional[EmailToolkit] = None,
     email_microsoft: Optional[EmailToolkit] = None,
     email_no_auth: Optional[EmailToolkit] = None,
+    toolkit_candidates: Optional[Mapping[str, Sequence[BaseToolkit]]] = None,
 ):
     """
     Create a pre-hook function that dynamically selects toolkits based on OAuth token availability.
@@ -103,6 +106,9 @@ def create_multi_toolkit_selector(
         email_google: Pre-initialized Gmail toolkit instance
         email_microsoft: Pre-initialized Outlook Mail toolkit instance
         email_no_auth: Pre-initialized no-auth Email toolkit (returns auth cards)
+        toolkit_candidates: Further toolkits by name, each an ordered candidate list. The first
+            candidate that is unauthenticated or whose integration has a token is used, so put a
+            connection-prompt fallback last.
 
     Returns:
         Callable[[Agent, Any], None]: Pre-hook function that accepts (agent, run_input) and
@@ -123,6 +129,10 @@ def create_multi_toolkit_selector(
         >>> agent = Agent(pre_hooks=[hook], ...)
         >>> # Agent will automatically select appropriate toolkits before each run
     """
+    toolkit_candidates = toolkit_candidates or {}
+    candidate_keys = [
+        toolkit.service_name for candidates in toolkit_candidates.values() for toolkit in candidates if toolkit.auth
+    ]
 
     def select_toolkits_hook(agent, run_input):
         """Pre-hook that dynamically selects toolkits based on token availability."""
@@ -148,6 +158,7 @@ def create_multi_toolkit_selector(
             "microsoft_drive",
             "google_gmail",
             "outlook_mail",
+            *candidate_keys,
         ]
         token_status = has_access_tokens_batch(user_id, all_integration_keys)
         logging.debug(f"[Pre-hook] Token status: {token_status}")
@@ -205,6 +216,18 @@ def create_multi_toolkit_selector(
 
         # Add Email toolkit (if enabled)
         add_toolkit_by_token("google_gmail", "outlook_mail", email_google, email_microsoft, email_no_auth, "Email")
+
+        # Add further toolkits from their ordered candidates (if enabled)
+        # TODO: the four toolkits above could become candidate groups too, replacing the
+        # per-provider parameters, the fixed key list and add_toolkit_by_token with this loop.
+        for toolkit_name, candidates in toolkit_candidates.items():
+            if tools_filter is not None and toolkit_name.lower() not in [t.lower() for t in tools_filter]:
+                logging.debug(f"[Pre-hook] {toolkit_name} toolkit filtered out (not in tools_filter)")
+                continue
+            selected = next((t for t in candidates if not t.auth or token_status.get(t.service_name, False)), None)
+            if selected is not None:
+                logging.debug(f"[Pre-hook] Adding {selected} for {toolkit_name}")
+                toolkits.append(selected)
 
         # Combine base tools with toolkits
         all_tools = base_tools + toolkits

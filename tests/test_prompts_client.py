@@ -662,5 +662,46 @@ class TestPromptsClientExtended(unittest.TestCase):
         self.assertEqual(mock_call_service.call_count, 3)  # MAX_RETRY_ATTEMPTS = 3
 
 
+class TestPromptsClientUnconfiguredLogging(unittest.TestCase):
+    """PRM-027..029: SERVICE_PROMPTS is optional, so leaving it unset must not log errors (#137)."""
+
+    def setUp(self):
+        prompt_cache.clear()
+
+    def _unconfigured_client(self) -> PromptsServiceClient:
+        with patch.dict("os.environ", {"SERVICE_PROMPTS": ""}):
+            return PromptsServiceClient()
+
+    def test_prm_027_unset_url_logs_info_once_and_no_key_file_warning(self):
+        """PRM-027: no SERVICE_PROMPTS gives one INFO line and no service-account warning."""
+        with patch.dict("os.environ", {"SERVICE_PROMPTS": ""}), patch("os.path.exists", return_value=False):
+            with self.assertLogs(level="DEBUG") as logs:
+                PromptsServiceClient()
+        self.assertEqual(
+            [(r.levelname, r.getMessage()) for r in logs.records],
+            [("INFO", "Prompts service disabled: SERVICE_PROMPTS is not set")],
+        )
+
+    def test_prm_028_set_url_without_key_file_still_warns(self):
+        """PRM-028: a set URL with no service account file is a misconfiguration and warns."""
+        with patch.dict("os.environ", {"SERVICE_PROMPTS": "https://prompts.example"}):
+            with patch("os.path.exists", return_value=False), self.assertLogs(level="WARNING") as logs:
+                PromptsServiceClient()
+        self.assertEqual([r.levelname for r in logs.records], ["WARNING"])
+        self.assertIn("Service account file not found", logs.records[0].getMessage())
+
+    def test_prm_029_unconfigured_calls_log_nothing_above_debug(self):
+        """PRM-029: list, get, create and delete on an unconfigured client stay below INFO."""
+        client = self._unconfigured_client()
+        with self.assertLogs(level="DEBUG") as logs:
+            self.assertEqual(client.list_prompts(), [])
+            self.assertIsNone(client.get_prompt("missing"))
+            self.assertFalse(client.create_prompt(PushPromptRequest(name="p", raw_template="t")))
+            self.assertFalse(client.delete_prompt("p"))
+        above_debug = [(r.levelname, r.getMessage()) for r in logs.records if r.levelno > 10]
+        self.assertEqual(above_debug, [])
+        self.assertEqual(sum("PromptsServiceClient not configured" in r.getMessage() for r in logs.records), 4)
+
+
 if __name__ == "__main__":
     unittest.main()
