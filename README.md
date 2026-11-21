@@ -420,7 +420,8 @@ HiveGate is built in the open, and these people have contributed to it:
   the shared task models and provider protocol (#219), the Google Tasks provider (#221), the
   Microsoft To Do provider (#224), the Tasks service and toolkit (#231), Tasks in native chat
   (#241) and Tasks approvals in the console CLI (#251), and made reconnecting an integration
-  evict the stale cached token and keep raw OAuth errors out of refresh failures (#230)
+  evict the stale cached token and keep raw OAuth errors out of refresh failures (#230), and
+  made declining every call in a paused run resume it so the model can reply (#254)
 - [@arpitkjaiswal](https://github.com/arpitkjaiswal) — documented the Bright Data toolkit's three
   settings in the README's Environment Variables table (#147)
 - [@rayulumukku](https://github.com/rayulumukku) — made a chat agent with an MCP server it can't
