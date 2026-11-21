@@ -57,7 +57,12 @@ toolkit = CalendarToolkit(
 
 Task management for Google Tasks and Microsoft To Do. The toolkit lists task
 lists and tasks, and registers create, update, complete, and delete as tools
-that require confirmation. Chat and CLI registration will follow separately.
+that require confirmation. Native chat offers it when the agent's prompt tags
+include `available_tools:tasks`. It uses the user's Google Tasks grant, then
+Microsoft To Do, and otherwise returns a connection prompt. Writes wait for the
+chat approval step, so `/toolkit/run` refuses this toolkit (and `/toolkit/confirm` only
+resumes executions that `/toolkit/run` created). See
+[TOKEN_API.md](../TOKEN_API.md#tasks-connections) for the integration keys and scopes.
 
 ## Additional Agent Tools
 

@@ -275,7 +275,7 @@ Resume a paused agent run with confirmed/edited tools.
 }
 ```
 
-**Cancellation**: To cancel/deny all tools, set `confirmed: false` for all tools:
+**Declining**: To decline a call, set `confirmed: false`. Add a `confirmation_note` to tell the model why:
 ```json
 {
   "run_id": "run_abc123",
@@ -285,13 +285,15 @@ Resume a paused agent run with confirmed/edited tools.
     {
       "tool_call_id": "call_1",
       "confirmed": false,
-      "confirmation_note": "User cancelled"
+      "confirmation_note": "Not this one"
     }
   ]
 }
 ```
 
-**Response (Cancelled)**:
+The run resumes as with any other commit, even when every call is declined. A declined call doesn't run. The model is told it was declined (with the note, if given), and it replies. The response is the usual completed one, or the usual event stream when `stream` is true.
+
+**Response (Run No Longer Available)**: On the gateway's agent and team commit routes (`/v2/agents/{agent_id}/chat/commit`, `/v2/teams/{team_id}/runs/commit`), if the paused run is no longer cached and every call in the request is declined, the commit returns this instead of a 410:
 ```json
 {
   "content": "Tool execution cancelled by user.",
