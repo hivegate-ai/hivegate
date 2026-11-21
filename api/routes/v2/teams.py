@@ -978,7 +978,8 @@ async def commit_team_run_v2(
     try:
         logging.info(f"Commit request for team {_log_safe(team_id)}, run_id: {_log_safe(body.run_id)}")
 
-        # Check if any tool has confirmed=false (user denial)
+        # Whether every decided call was declined (confirmed=false); undecided calls are ignored.
+        # Only matters when the run is no longer cached: see below.
         tools_with_confirmation = [tool for tool in body.updated_tools if tool.get("confirmed") is not None]
         all_denied = len(tools_with_confirmation) > 0 and all(
             tool.get("confirmed") is False for tool in tools_with_confirmation
@@ -1006,22 +1007,9 @@ async def commit_team_run_v2(
                     detail="Confirmation time window has elapsed. The run is no longer available for resumption.",
                 )
 
+            # A cached run resumes even when every call is declined: agno reports the
+            # declined calls to the model as rejected, and the model replies.
             cached_run = _team_run_cache[body.run_id]
-
-        # Check if user denied all tools
-        if all_denied:
-            logging.info(f"User denied all tools for run_id: {_log_safe(body.run_id)}")
-            # Clean up run cache
-            with _team_run_cache_lock:
-                if body.run_id in _team_run_cache:
-                    del _team_run_cache[body.run_id]
-            return TeamRunResponse(
-                content="Tool execution cancelled by user.",
-                team_id=team_id,
-                session_id=body.session_id or "",
-                model=body.model.value,
-                status="cancelled",
-            )
 
         # Update tools with user confirmations/edits
         UPDATABLE_FIELDS = {"tool_args", "args", "confirmed", "confirmation_note"}

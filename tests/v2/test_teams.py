@@ -4,8 +4,9 @@ Integration tests for V2 teams API endpoints.
 
 import datetime
 import unittest
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from db.db_models import AgentInfoDB, TeamAgentDB, TeamInfoDB
 from tests.test_utils import create_test_client
@@ -813,6 +814,48 @@ class TestV2TeamRunsAPI(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["status"], "cancelled")
         self.assertIn("cancelled", data["content"])
+
+    @patch("api.routes.v2.teams.record_usage", new_callable=AsyncMock)
+    @patch("api.routes.v2.teams.create_team")
+    @patch("api.routes.v2.teams.get_db_url", return_value="postgresql://test")
+    @patch("api.routes.v2.teams.get_agent")
+    @patch("api.routes.v2.teams.get_team_agents")
+    @patch("api.routes.v2.teams.get_team_info")
+    def test_tm_056_commit_all_tools_denied_resumes_cached_run(
+        self, mock_get_team, mock_get_agents, mock_get_agent, mock_db_url, mock_create_team, mock_record
+    ):
+        """TM-056: Commit - all tools denied on a cached run resumes it, so the model replies."""
+        from agno.models.response import ToolExecution
+
+        tool = ToolExecution(
+            tool_call_id="call_1", tool_name="delete_budget", tool_args={"budget_id": 7}, requires_confirmation=True
+        )
+        cached_run = SimpleNamespace(tools=[tool], requirements=None)
+        mock_get_team.return_value = TeamInfoDB(id="test-team", name="Test Team")
+        mock_get_agents.return_value = [TeamAgentDB(team_id="test-team", agent_id="agent-1", order_index=0)]
+        team = MagicMock()
+        team.acontinue_run = AsyncMock(return_value=SimpleNamespace(content="OK, I won't delete it.", metrics=None))
+        mock_create_team.return_value = team
+        mock_record.return_value = None
+
+        with patch.dict("api.routes.v2.teams._team_run_cache", {"run-1": cached_run}, clear=True) as cache:
+            response = self.client.post(
+                "/v2/teams/test-team/runs/commit",
+                json={
+                    "run_id": "run-1",
+                    "updated_tools": [{"tool_call_id": "call_1", "confirmed": False, "confirmation_note": "No"}],
+                    "stream": False,
+                },
+            )
+            self.assertNotIn("run-1", cache)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data["status"], "completed")
+        self.assertEqual(data["content"], "OK, I won't delete it.")
+        [requirement] = team.acontinue_run.await_args.kwargs["requirements"]
+        self.assertIs(requirement.confirmation, False)
+        self.assertEqual(requirement.confirmation_note, "No")
 
 
 if __name__ == "__main__":
