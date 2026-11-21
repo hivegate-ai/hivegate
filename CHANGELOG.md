@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that is no longer cached still gets the `cancelled` reply (#245)
 
 ### Fixed
+- Leaving `SERVICE_PROMPTS` unset no longer fills the log with `PromptsServiceClient not properly
+  configured` errors, several per request. It is optional, so the gateway now logs one INFO line
+  at startup saying the prompts service is disabled, and the per-call message is DEBUG. A set
+  `SERVICE_PROMPTS` with no service account file still warns, and real failures still log errors
+  (#137)
 - The console CLI (`cli/agent_cli.py`) now asks for approval on every call the gateway marks
   `requires_confirmation`, instead of only the tools in its own hardcoded list, so Tasks writes
   get a prompt. `run_claude_code` and `run_managed_agent` were never in that list, and their runs
