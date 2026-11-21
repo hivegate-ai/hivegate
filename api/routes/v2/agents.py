@@ -30,7 +30,7 @@ from agents.hitl import requirements_for
 from agents.mcp_validation import SUPPORTED_MCP_TRANSPORTS, mcp_url_problem, normalize_mcp_transport
 from agents.agent import build_mcp_toolkits, connect_mcp_toolkits, get_agent_db
 from agents.agent import get_agent as get_agent_impl
-from agents.agent import slug_to_table_name
+from agents.agent import normalize_toolkits, slug_to_table_name
 from agents.gemini_api import gemini_http_options
 from agents.model_factory import ProviderNotConfiguredError
 from agents.model_resolver import resolve_model_id
@@ -64,6 +64,7 @@ from db.db_models import ApiKeyDB
 from db.mcp_server_crud import UnknownMCPServersError, get_mcp_servers_by_ids, mcp_server_configs_for_chat
 from db.session import get_db
 from supervisor.models import WorkerConfig
+from toolkits.tasks import TasksToolkit
 
 # Agent caching infrastructure
 _agent_cache: Dict[str, Agent] = {}
@@ -73,6 +74,11 @@ _run_cache: Dict[str, Any] = {}
 # Toolkit execution cache for confirmation flow
 _toolkit_execution_cache: Dict[str, Dict[str, Any]] = {}
 _toolkit_execution_lock = Lock()
+
+# Toolkits offered only by cached native chat, whose approval pause and commit gate their writes.
+# TODO: move this to a toolkit registry once a second toolkit registers here.
+# Keyed by available_tools name; each factory returns the toolkit's ordered provider candidates.
+CHAT_TOOLKIT_FACTORIES = {"tasks": TasksToolkit.provider_candidates}
 
 
 class AgnoJSONEncoder(json.JSONEncoder):
@@ -203,6 +209,8 @@ def compute_cache_key(
     user_id: str,
     session_id: str,
     prompt_name: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    tools: Optional[List[str]] = None,
 ) -> str:
     """
     Compute CRC32-based cache key for agent caching.
@@ -214,11 +222,21 @@ def compute_cache_key(
         user_id: User identifier
         session_id: Session identifier
         prompt_name: Prompt identity, which also determines the session table
+        system_prompt: Per-request system prompt, which changes the agent's instructions
+        tools: Per-request toolkit filter, which changes the agent's tools
 
     Returns:
         Cache key string: "crc32_hash:agent_id:model_id"
     """
     prompt_identity = json.dumps([prompt_name, prompt_template]) if prompt_name is not None else prompt_template
+    # Per-request overrides build a different agent, so they must not share its cache
+    # entry. Only added when set, so keys without overrides are unchanged.
+    # A blank system_prompt is ignored when the agent is built, so it is ignored here too.
+    request_prompt = (system_prompt or "").strip() or None
+    request_tools = normalize_toolkits(tools)
+    if request_prompt is not None or request_tools is not None:
+        overrides = [request_prompt, sorted(request_tools) if request_tools is not None else None]
+        prompt_identity += json.dumps(overrides)
     crc32_hash = zlib.crc32(prompt_identity.encode("utf-8")) & 0xFFFFFFFF
     # The resolved id, not the alias: when "anthropic:sonnet-latest" moves to a newer
     # model, a cached agent built on the old one must not keep being served.
@@ -512,8 +530,12 @@ class ChatRequest(BaseModel):
     timezone: str  # User timezone (e.g., "America/New_York", "Asia/Jerusalem")
     locale: str  # User locale (e.g., "en-US", "he-IL")
     images: Optional[List[Dict[str, Any]]] = None  # Image file data for multimodal messages
-    system_prompt: Optional[str] = None  # Custom system prompt (defaults to template from prompts service)
-    tools: Optional[List[str]] = None  # Optional list of tool identifiers for cache key
+    # Per-request instructions, appended to the agent's stored prompt (never replacing it).
+    system_prompt: Optional[str] = None
+    # Per-request toolkit filter (e.g. ["calendar", "email"]). It narrows the toolkits the
+    # agent's prompt tag enables, never widens them; [] turns optional toolkits off. An
+    # unknown name is a 400.
+    tools: Optional[List[str]] = None
 
 
 class CommitRequest(BaseModel):
@@ -526,6 +548,9 @@ class CommitRequest(BaseModel):
     session_id: str
     updated_tools: List[Dict[str, Any]]
     user_profile: Optional[UserProfile] = None
+    # Send the same values as the chat that paused, so the commit finds that agent.
+    system_prompt: Optional[str] = None
+    tools: Optional[List[str]] = None
 
 
 class ChatResponse(BaseModel):
@@ -953,8 +978,19 @@ def _get_agent_prompt(db: Session, agent_id: str, prompt_service_id: str) -> Pul
 
 
 async def get_agent(
-    db: Session, agent_id: str, model: Model, user_id: str, session_id: str
+    db: Session,
+    agent_id: str,
+    model: Model,
+    user_id: str,
+    session_id: str,
+    system_prompt: Optional[str] = None,
+    tools: Optional[List[str]] = None,
 ) -> tuple[Optional[Agent], PullPromptResponse, str, AgentConfig]:
+    # An unknown toolkit name is the caller's mistake: say which, instead of dropping it.
+    try:
+        normalize_toolkits(tools)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     # Validate agent exists in database first
     db_agent = get_agent_info(db, agent_id)
     if not db_agent:
@@ -963,7 +999,14 @@ async def get_agent(
     prompt_data = _get_agent_prompt(db, agent_id, str(db_agent.prompt_service_id))
     # Compute CRC32 cache key
     cache_key = compute_cache_key(
-        prompt_data.template, agent_id, model, user_id, session_id, prompt_name=prompt_data.name
+        prompt_data.template,
+        agent_id,
+        model,
+        user_id,
+        session_id,
+        prompt_name=prompt_data.name,
+        system_prompt=system_prompt,
+        tools=tools,
     )
     logging.debug(f"Computed cache key for agent {_log_safe(agent_id)}: {_log_safe(cache_key)}")
     # Get agent config from database
@@ -1092,7 +1135,7 @@ async def chat_with_agent_v2(
 
         # Get or create cached agent (same for all messages including multimodal)
         agent, prompt_data, cache_key, agent_config = await get_agent(
-            db, agent_id, body.model, body.user_id, body.session_id
+            db, agent_id, body.model, body.user_id, body.session_id, body.system_prompt, body.tools
         )
 
         validate_mcp_servers_for_chat(agent_config)
@@ -1117,6 +1160,8 @@ async def chat_with_agent_v2(
                     timezone=body.timezone,
                     config=agent_config,
                     extra_tools=connected_toolkits,
+                    system_prompt=body.system_prompt,
+                    tools=body.tools,
                 )
 
             if body.stream:
@@ -1204,6 +1249,9 @@ async def chat_with_agent_v2(
                 tenant_id=body.tenant_profile.tenant_id if body.tenant_profile else "default_tenant",
                 timezone=body.timezone,
                 config=agent_config,
+                system_prompt=body.system_prompt,
+                tools=body.tools,
+                toolkit_factories=CHAT_TOOLKIT_FACTORIES,
             )
             _agent_cache[cache_key] = agent
             logging.info(f"Agent cached with key: {_log_safe(cache_key)}")
@@ -1587,8 +1635,8 @@ async def commit_agent_chat_v2(
     try:
         logging.info(f"Commit request for agent {_log_safe(agent_id)}, run_id: {_log_safe(body.run_id)}")
 
-        # Check if any tool has confirmed=false (user denial)
-        # Only consider tools that have an explicit confirmed field (ignore None/missing)
+        # Whether every decided call was declined (confirmed=false); undecided calls are ignored.
+        # Only matters when the run is no longer cached: see below.
         tools_with_confirmation = [tool for tool in body.updated_tools if tool.get("confirmed") is not None]
         all_denied = len(tools_with_confirmation) > 0 and all(
             tool.get("confirmed") is False for tool in tools_with_confirmation
@@ -1615,21 +1663,9 @@ async def commit_agent_chat_v2(
                 detail="Confirmation time window has elapsed. The run is no longer available for resumption.",
             )
 
+        # A cached run resumes even when every call is declined: agno reports the
+        # declined calls to the model as rejected, and the model replies.
         cached_run = _run_cache[body.run_id]
-
-        # Check if user denied all tools (confirmed=false)
-        if all_denied:
-            logging.info(f"User denied all tools for run_id: {_log_safe(body.run_id)}")
-            # Clean up run cache
-            if body.run_id in _run_cache:
-                del _run_cache[body.run_id]
-            return ChatResponse(
-                content="Tool execution cancelled by user.",
-                agent_id=agent_id,
-                session_id=body.session_id,
-                model=body.model,
-                status="cancelled",
-            )
 
         # Update tools with user confirmations/edits
         UPDATABLE_FIELDS = {"tool_args", "args", "confirmed", "confirmation_note"}
@@ -1645,7 +1681,9 @@ async def commit_agent_chat_v2(
                     break
 
         # Find agent in cache.
-        agent, _, _, _ = await get_agent(db, agent_id, body.model, body.user_id, body.session_id)
+        agent, _, _, _ = await get_agent(
+            db, agent_id, body.model, body.user_id, body.session_id, body.system_prompt, body.tools
+        )
         if not agent:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found in cache")
 
@@ -1886,6 +1924,11 @@ async def run_toolkit_method_v2(
                 status_code=404,
                 detail=f"Toolkit '{toolkit_name}' not found in agent tools. Available: {[t.__class__.__name__ for t in tools_list]}",
             )
+
+        # Some toolkits gate their writes on the chat approval flow and are not run directly.
+        # A JSONResponse, because the broad except below would turn an HTTPException into a 500.
+        if not getattr(toolkit, "allow_direct_invocation", True):
+            return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": "Use chat for this toolkit."})
 
         # Check if method exists
         if not hasattr(toolkit, method_name):

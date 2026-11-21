@@ -65,6 +65,17 @@ def _valid_id(value: object) -> bool:
 class TasksToolkit(BaseToolkit):
     """List and manage tasks using the user's connected task account."""
 
+    # Writes rely on the native chat approval pause, so the direct toolkit routes refuse Tasks.
+    allow_direct_invocation = False
+
+    @classmethod
+    def provider_candidates(
+        cls, user_id: str, fetch_token_func: Callable[[str, str], str | None]
+    ) -> list["TasksToolkit"]:
+        """Return the connected providers in selection order, then the connection prompt."""
+        providers = [cls(user_id, key, fetch_token_func=fetch_token_func) for key in _TASKS_PROVIDERS]
+        return [*providers, cls(user_id, "tasks", auth=False)]
+
     def __init__(
         self,
         user_id: str,

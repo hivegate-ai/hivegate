@@ -15,8 +15,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the rejected value there, and for a missing field the whole request body, so a typo next to an
   access token or an MCP header sent the secret back in the error. `loc`, `msg` and `type` are
   unchanged. A client that read `input` out of a 422 needs to change
+- `system_prompt` and `tools` on `POST /v2/agents/{agent_id}/chat` now take effect. They used to
+  be accepted and ignored, so a client that already sends them will see them apply. An unknown
+  toolkit name in `tools` is now a 400 (#88, @visveshkhanna)
+
+### Changed
+- Declining every call in a paused batch now resumes the run, as declining only some of them
+  already did. The agent and team commit routes used to answer `"Tool execution cancelled by
+  user."` with `status: cancelled` and never resume the run, so the model was not told and did
+  not reply. Now the declined calls don't run, the model is told they were declined (with the
+  `confirmation_note`, if any), and the commit returns the model's reply, streamed when `stream`
+  is true for agents. A client that relied on `cancelled` for a declined batch will now get a
+  completed run. Like any commit, a declined one now calls the model, so it is metered, and a
+  model error leaves the run paused for a retry. A commit that declines every call for a run
+  that is no longer cached still gets the `cancelled` reply (#245)
 
 ### Fixed
+- Leaving `SERVICE_PROMPTS` unset no longer fills the log with `PromptsServiceClient not properly
+  configured` errors, several per request. It is optional, so the gateway now logs one INFO line
+  at startup saying the prompts service is disabled, and the per-call message is DEBUG. A set
+  `SERVICE_PROMPTS` with no service account file still warns, and real failures still log errors
+  (#137)
+- The console CLI (`cli/agent_cli.py`) now asks for approval on every call the gateway marks
+  `requires_confirmation`, instead of only the tools in its own hardcoded list, so Tasks writes
+  get a prompt. `run_claude_code` and `run_managed_agent` were never in that list, and their runs
+  used to sit paused with no prompt; they now get the generic approval dialog too. The generic
+  editor keeps object arguments (nested values and `null`s) by editing them as JSON, a paused
+  batch is submitted once instead of being prompted again after every commit, and in streaming
+  mode every pending call in the batch is prompted, not only the last one (#196)
+- Chat agents now get agno's generated system prompt after their stored prompt: the current
+  date and time in the agent's timezone, the list of attached skills, memory guidance, toolkit
+  and knowledge-search instructions, and the markdown instruction. The stored prompt used to be
+  passed as agno's `system_message`, which agno sends as-is, so all of that was dropped and
+  `add_datetime_to_context` did nothing. `{var}` placeholders in stored prompts still resolve.
+  A stored prompt that expected to be the whole system message will now have that context after
+  it (#232, @visveshkhanna)
 - A chat agent's MCP server with transport `HTTP` (any capitalisation other than lowercase)
   passed the chat check and was then dropped without its tools. Both now share one check
 - An MCP server URL with an invalid port (`:99999`, `:abc`) is refused by the chat check instead
@@ -43,6 +76,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chat keeps working. Each chunk records `embedding_model` and `embedding_dimensions`. Unset,
   behaviour is unchanged: `google:gemini-embedding-001` in `unified_knowledge` (#119,
   @visveshkhanna)
+
+- A chat request's `system_prompt` is appended to the agent's stored prompt as extra
+  instructions for that request. It never replaces the stored prompt, and `{...}` or `$...` in it
+  can't pull session values such as `user_id` into the prompt (#88, @visveshkhanna)
+- A chat request's `tools` (for example `["calendar", "email"]`) narrows the optional toolkits the
+  agent gets. It can only remove toolkits the prompt's `available_tools:` tag enables, never add
+  any. `[]` turns them all off, and the datetime resolver always stays on. A request with either
+  field gets its own agent cache entry, and a `chat/commit` resuming that run sends the same
+  values (#88, @visveshkhanna)
 
 ### Tests
 - The two scripts in the repo root that `pytest tests/` never ran are gone (#142, @visveshkhanna).
