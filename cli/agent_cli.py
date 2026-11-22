@@ -1207,6 +1207,13 @@ class ConsoleChatClient:
                         print(f"[error] {response.status_code}: {response.text}")
                         return
 
+                    # The gateway answers in JSON, even for a streaming commit, when every call
+                    # is declined for a run that is no longer cached
+                    if response.headers.get("content-type", "").startswith("application/json"):
+                        response.read()
+                        self.handle_single_response(response.json())
+                        return
+
                     event_count = 0
                     current_event_type = None
                     content_buffer = ""

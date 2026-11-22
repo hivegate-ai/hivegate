@@ -180,3 +180,21 @@ def test_cli_sends_the_typed_reason_for_a_declined_call_alongside_a_confirmed_on
     _, update, delete = payload["updated_tools"]
     assert (update["confirmed"], update["tool_args"]) == (True, UPDATE)
     assert (delete["confirmed"], delete["confirmation_note"]) == (False, "Keep that one")
+
+
+def test_cli_shows_the_json_reply_to_a_streaming_commit(monkeypatch, capsys):
+    # A run that is no longer cached: the gateway answers an all-declined streaming commit in JSON.
+    client, _ = _client(monkeypatch, ("decline",), stream=True)
+    paused = {**PAUSED, "tools": [_pending(0, "delete_task", DELETE)]}
+    cancelled = {"status": "cancelled", "content": "Tool execution cancelled by user."}
+    transport_client = httpx.Client
+
+    def transport(request):
+        if request.url.path.endswith("/commit"):
+            return httpx.Response(200, json=cancelled)
+        return httpx.Response(200, text=_sse({"event": "RunStarted", "run_id": "run"}, paused))
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: transport_client(transport=httpx.MockTransport(transport)))
+    client.handle_sse_stream("Delete task")
+
+    assert "Tool execution cancelled by user." in capsys.readouterr().out

@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at startup saying the prompts service is disabled, and the per-call message is DEBUG. A set
   `SERVICE_PROMPTS` with no service account file still warns, and real failures still log errors
   (#137)
+- The console CLI now prints the gateway's reply to a streaming commit that comes back as JSON.
+  The gateway does that when every call is declined for a run that is no longer cached, and the
+  CLI used to print nothing (#246)
 - The console CLI (`cli/agent_cli.py`) now asks for approval on every call the gateway marks
   `requires_confirmation`, instead of only the tools in its own hardcoded list, so Tasks writes
   get a prompt. `run_claude_code` and `run_managed_agent` were never in that list, and their runs
