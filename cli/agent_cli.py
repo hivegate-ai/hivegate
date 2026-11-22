@@ -904,7 +904,7 @@ class ConsoleChatClient:
         # NEW: Use InquirerPy to handle each confirmable tool
         # Start from copies of the entire tools payload, so /commit can reopen an uncommitted batch
         updated_tools: List[Dict[str, Any]] = [dict(t) for t in tools]
-        tools_to_confirm = []
+        decided_tools = []
         should_cancel = False
 
         for confirmable in confirmables:
@@ -920,6 +920,16 @@ class ConsoleChatClient:
                 elif action == "skip":
                     print(f"[info] Skipped tool: {confirmable.get('tool_name') or confirmable.get('name')}")
                     continue
+                elif action == "decline":
+                    # The run resumes and the model is told the call was declined, with the note
+                    tool_id = confirmable.get("tool_call_id") or confirmable.get("id")
+                    for t in updated_tools:
+                        if (t.get("tool_call_id") or t.get("id")) == tool_id:
+                            t["confirmed"] = False
+                            t["confirmation_note"] = result.get("note") or "Declined by the user."
+                            decided_tools.append(t)
+                            break
+                    print(f"[info] Declined tool: {confirmable.get('tool_name') or confirmable.get('name')}")
                 elif action == "confirm":
                     # Update the tool's args in the payload
                     tool_id = confirmable.get("tool_call_id") or confirmable.get("id")
@@ -935,7 +945,7 @@ class ConsoleChatClient:
                             t["confirmation_note"] = (t.get("tool_name") or t.get("name") or "confirm").replace(
                                 "_", "-"
                             )
-                            tools_to_confirm.append(t)
+                            decided_tools.append(t)
                             break
                     print(f"[info] Confirmed tool: {confirmable.get('tool_name') or confirmable.get('name')}")
 
@@ -944,9 +954,10 @@ class ConsoleChatClient:
                 should_cancel = True
                 break
 
-        if should_cancel or not tools_to_confirm:
-            if not tools_to_confirm and not should_cancel:
-                print("[info] No tools confirmed.")
+        # A batch with at least one confirmed or declined call is committed; one that is all skipped is not
+        if should_cancel or not decided_tools:
+            if not decided_tools and not should_cancel:
+                print("[info] No tools confirmed or declined.")
             return
 
         # Commit

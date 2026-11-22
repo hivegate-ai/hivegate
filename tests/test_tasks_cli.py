@@ -29,8 +29,9 @@ PAUSED = {
 }
 
 
-def _client(monkeypatch, decisions, stream):
-    """Load the CLI with InquirerPy stubbed: text prompts keep their defaults, actions come from `decisions`."""
+def _client(monkeypatch, decisions, stream, reason=""):
+    """Load the CLI with InquirerPy stubbed: actions come from `decisions`, the reason for declining a call is
+    `reason`, and other prompts keep their defaults."""
     directory = Path(__file__).resolve().parents[1] / "cli"
     monkeypatch.syspath_prepend(str(directory))
     monkeypatch.setattr("logging.handlers.RotatingFileHandler", lambda *args, **kwargs: logging.NullHandler())
@@ -39,7 +40,13 @@ def _client(monkeypatch, decisions, stream):
     monkeypatch.setattr(logger, "level", logger.level)
     select = Mock(side_effect=[SimpleNamespace(execute=lambda action=action: action) for action in decisions])
     keep_default = lambda message, default: SimpleNamespace(execute=lambda: default)  # noqa: E731
-    inquirer = SimpleNamespace(select=select, text=keep_default, confirm=keep_default, number=keep_default)
+
+    def text(message, default):
+        return (
+            SimpleNamespace(execute=lambda: reason) if message.startswith("Reason") else keep_default(message, default)
+        )
+
+    inquirer = SimpleNamespace(select=select, text=text, confirm=keep_default, number=keep_default)
     terminal_stubs = {
         "InquirerPy": SimpleNamespace(inquirer=inquirer),
         "InquirerPy.base.control": SimpleNamespace(Choice=SimpleNamespace),
@@ -107,7 +114,7 @@ def test_cli_prompts_for_every_pending_task_write_and_commits_once(monkeypatch, 
     assert (update["confirmed"], delete["confirmed"]) == (True, True)
 
 
-@pytest.mark.parametrize("decisions", [("skip", "skip"), ("confirm", "cancel")])
+@pytest.mark.parametrize("decisions", [("skip", "skip"), ("confirm", "cancel"), ("decline", "cancel")])
 def test_cli_submits_nothing_without_a_decision_and_commit_reopens_the_batch(monkeypatch, decisions):
     client, _ = _client(monkeypatch, decisions, stream=False)
 
@@ -142,3 +149,34 @@ def test_cli_prompts_for_other_approval_tools_and_keeps_custom_dialogs(monkeypat
     delete_contact.assert_called_once()
     assert select.call_count == 1
     assert [t["confirmed"] for t in payload["updated_tools"]] == [True, True]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_cli_commits_a_batch_whose_only_call_is_declined_and_shows_the_reply(monkeypatch, capsys, stream):
+    client, select = _client(monkeypatch, ("decline",), stream)
+    pending = _pending(0, "delete_task", DELETE)
+    paused = {**PAUSED, "tools": [pending]}
+    # The reply lists the declined call again, as the gateway does
+    reply = {
+        "status": "completed",
+        "content": "Understood, I left the task alone.",
+        "tools": [{**pending, "confirmed": False}],
+    }
+
+    [payload] = _run(monkeypatch, client, stream, reply, paused=paused)
+
+    # An empty reason falls back to a default note, which the gateway passes to the model.
+    [declined] = payload["updated_tools"]
+    assert (declined["confirmed"], declined["confirmation_note"]) == (False, "Declined by the user.")
+    assert "Understood, I left the task alone." in capsys.readouterr().out
+    assert select.call_count == 1  # the declined call is not asked about again
+
+
+def test_cli_sends_the_typed_reason_for_a_declined_call_alongside_a_confirmed_one(monkeypatch):
+    client, _ = _client(monkeypatch, ("confirm", "decline"), stream=False, reason="Keep that one")
+
+    [payload] = _run(monkeypatch, client, False, COMPLETED_REPLY)
+
+    _, update, delete = payload["updated_tools"]
+    assert (update["confirmed"], update["tool_args"]) == (True, UPDATE)
+    assert (delete["confirmed"], delete["confirmation_note"]) == (False, "Keep that one")
