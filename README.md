@@ -434,6 +434,8 @@ HiveGate is built in the open, and these people have contributed to it:
   knowledge embedder configurable with `KNOWLEDGE_EMBEDDER`, so knowledge works without a Google
   key (#238), and made chat honour a request's `system_prompt` and `tools` while agno builds the
   full system prompt around the stored one (#237)
+- [@InesZenkri](https://github.com/InesZenkri) — made the console CLI print a streaming request's
+  error reply (`[error] 410: ...`) instead of crashing with `ResponseNotRead` (#262)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.

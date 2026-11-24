@@ -1126,6 +1126,7 @@ class ConsoleChatClient:
             with httpx.Client(timeout=300.0) as client:
                 with client.stream("POST", self.chat_endpoint, json=payload) as response:
                     if response.status_code != 200:
+                        response.read()
                         print(f"[error] {response.status_code}: {response.text}")
                         return
 
@@ -1204,6 +1205,7 @@ class ConsoleChatClient:
             with httpx.Client(timeout=300.0) as client:
                 with client.stream("POST", self.commit_endpoint, json=commit_payload) as response:
                     if response.status_code != 200:
+                        response.read()
                         print(f"[error] {response.status_code}: {response.text}")
                         return
 
