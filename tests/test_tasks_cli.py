@@ -198,3 +198,33 @@ def test_cli_shows_the_json_reply_to_a_streaming_commit(monkeypatch, capsys):
     client.handle_sse_stream("Delete task")
 
     assert "Tool execution cancelled by user." in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("stream_kind", ["chat", "commit"])
+@pytest.mark.parametrize("status_code", [401, 410, 500])
+def test_cli_shows_chunked_streaming_errors(monkeypatch, capsys, stream_kind, status_code):
+    client, _ = _client(monkeypatch, (), stream=True)
+    transport_client = httpx.Client
+    responses = []
+
+    def transport(request):
+        expected_endpoint = client.chat_endpoint if stream_kind == "chat" else client.commit_endpoint
+        assert str(request.url) == expected_endpoint
+        assert request.method == "POST"
+        # An iterator keeps the body unread, unlike bytes or json=, which hide ResponseNotRead.
+        response = httpx.Response(status_code, content=iter([b'{"detail": "', b"Run expired", b'"}']))
+        assert not response.is_stream_consumed
+        responses.append(response)
+        return response
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: transport_client(transport=httpx.MockTransport(transport)))
+
+    if stream_kind == "chat":
+        client.handle_sse_stream("Hello")
+    else:
+        client._handle_commit_sse_stream({"run_id": "run", "stream": True, "updated_tools": []})
+
+    assert capsys.readouterr().out.strip() == f'[error] {status_code}: {{"detail": "Run expired"}}'
+    [response] = responses
+    assert response.is_stream_consumed
+    assert response.is_closed
