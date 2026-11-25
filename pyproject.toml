@@ -19,7 +19,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "agno[mcp]>=3.1.2",
+  "agno[mcp]>=3.2.0",
   "fastapi[standard]",
   "google-genai>=3.0.0",
   "google-cloud-storage",

@@ -26,7 +26,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
-from agents.hitl import CachedRun, ChatContext, requirements_for
+from agents.hitl import CachedRun, ChatContext, approved_targets, requirements_for, unavailable_targets
 from agents.mcp_validation import SUPPORTED_MCP_TRANSPORTS, mcp_url_problem, normalize_mcp_transport
 from agents.agent import build_mcp_toolkits, connect_mcp_toolkits, get_agent_db
 from agents.agent import get_agent as get_agent_impl
@@ -63,6 +63,7 @@ from db.agent_info_crud import (
 from db.db_models import ApiKeyDB
 from db.mcp_server_crud import UnknownMCPServersError, get_mcp_servers_by_ids, mcp_server_configs_for_chat
 from db.session import get_db
+from db.user_token_crud import has_user_tokens_batch
 from supervisor.models import WorkerConfig
 from toolkits.tasks import TasksToolkit
 
@@ -788,6 +789,7 @@ async def chat_response_streamer_v2(
     db: Session = Depends(get_db),
     usage_ctx: Optional[usage_service.UsageContext] = None,
     chat_context: Optional[ChatContext] = None,
+    keep_tools: bool = False,
 ) -> AsyncGenerator:
     """
     Stream agent responses chunk by chunk (v2 implementation).
@@ -894,7 +896,8 @@ async def chat_response_streamer_v2(
 
                 # Cache the run for later commit if run_id is present
                 if "run_id" in event_data and event_data["run_id"]:
-                    _run_cache[event_data["run_id"]] = CachedRun(chunk, chat_context)
+                    run_tools = agent.tools if keep_tools else None
+                    _run_cache[event_data["run_id"]] = CachedRun(chunk, chat_context, run_tools)  # type: ignore[arg-type]
 
                 # Process tools using shared helper function
                 _process_tools_in_event(event_data)
@@ -1263,7 +1266,7 @@ async def chat_with_agent_v2(
         if body.stream:
             logging.info(f"Returning v2 streaming response for agent: {_log_safe(agent_id)}")
             return StreamingResponse(
-                chat_response_streamer_v2(agent, body, db, usage_ctx, chat_context),
+                chat_response_streamer_v2(agent, body, db, usage_ctx, chat_context, keep_tools=True),
                 media_type="text/event-stream",
             )
         else:
@@ -1353,7 +1356,7 @@ async def chat_with_agent_v2(
 
             # Cache the run for later commit
             if hasattr(response, "run_id") and response.run_id:
-                _run_cache[response.run_id] = CachedRun(response, chat_context)
+                _run_cache[response.run_id] = CachedRun(response, chat_context, agent.tools)  # type: ignore[arg-type]
 
             # Convert tools to dict format
             tools_dict = []
@@ -1668,7 +1671,7 @@ async def commit_agent_chat_v2(
 
         # A cached run resumes even when every call is declined: agno reports the
         # declined calls to the model as rejected, and the model replies.
-        cached_run, run_context = _run_cache[body.run_id]
+        cached_run, run_context, run_tools = _run_cache[body.run_id]
 
         # Only the chat that started the run may decide its calls. Checked before anything is
         # changed, so a refused commit leaves the run as it was.
@@ -1690,12 +1693,36 @@ async def commit_agent_chat_v2(
                             setattr(original_tool, key, value)
                     break
 
+        # An approval covers only the target the call was planned for. If that is gone, nothing runs.
+        if run_tools is not None:
+            gone = unavailable_targets(
+                approved_targets(cached_run),
+                run_tools,
+                lambda targets: has_user_tokens_batch(db, cast(str, body.user_id), targets),
+            )
+            if gone:
+                logging.warning(
+                    f"Commit refused: run {_log_safe(body.run_id)} lost its target {_log_safe(sorted(gone))}"
+                )
+                _run_cache.pop(body.run_id, None)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="The connection this action was approved for is no longer available. "
+                    "Please send your request again.",
+                )
+
         # Find agent in cache.
         agent, _, _, _ = await get_agent(
             db, agent_id, body.model, body.user_id, body.session_id, body.system_prompt, body.tools
         )
         if not agent:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found in cache")
+
+        # Resume on a copy with the run's own tools: another message in this session can change
+        # the shared agent's tools, and with them the provider a call reaches.
+        if run_tools is not None:
+            agent = copy.copy(agent)
+            agent.set_tools(run_tools)
 
         # Continue the run with updated tools
         if body.stream:

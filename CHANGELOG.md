@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   different API key could commit the run, and a commit for a different user or session could mark
   its calls approved even though it then failed. A client that commits with a different key than
   it chatted with will now get the 403 (#253)
+- An approved call in an agent chat without MCP servers now runs against the provider it was
+  planned for. Before, connecting Google and sending another message in the same session could
+  send an approved Microsoft write to Google. If the planned provider is no longer connected, the
+  commit gets a 409, nothing runs, and the paused run is dropped, so the request has to be sent
+  again. The `toolkit` recorded on a native toolkit's calls, also in run events and metrics, is
+  now its service name: the integration key, such as `google_tasks`, when it is connected. Needs
+  agno 3.2.0 or later, which records it (#253)
 
 ### Fixed
 - Leaving `SERVICE_PROMPTS` unset no longer fills the log with `PromptsServiceClient not properly
