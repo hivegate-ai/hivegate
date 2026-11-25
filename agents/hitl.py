@@ -20,9 +20,10 @@ private `_sync_requirements_with_tools`, done here so it does not depend on a pr
 helper.
 """
 
-from typing import Any, List, NamedTuple, Optional
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set
 
 from agno.run.requirement import RunRequirement
+from agno.tools import Toolkit
 
 
 class ChatContext(NamedTuple):
@@ -35,10 +36,33 @@ class ChatContext(NamedTuple):
 
 
 class CachedRun(NamedTuple):
-    """A run kept for a later commit, with the chat that started it."""
+    """A run kept for a later commit, with the chat that started it and the tools it was planned with."""
 
     run: Any
     context: Optional[ChatContext]  # None matches no commit
+    tools: Optional[List[Any]] = None  # None (MCP chat, teams) resumes with the agent's current tools
+
+
+def approved_targets(run: Any) -> Set[str]:
+    """The targets agno recorded when the approved calls still to run were planned. Opaque: compare, don't parse."""
+    return {tool.toolkit for tool in run.tools or [] if tool.confirmed and tool.result is None and tool.toolkit}
+
+
+def unavailable_targets(
+    targets: Set[str], tools: List[Any], connections: Callable[[List[str]], Dict[str, bool]]
+) -> Set[str]:
+    """The targets a run can't dispatch to: not among its tools, or disconnected since it was planned.
+
+    `connections` says which of the given targets the user has connected now. It must not be
+    answered from a token cache: a cached token outlives its connection. It should raise if it
+    can't tell, so that an outage isn't taken for a disconnect.
+    """
+    toolkits = {tool.recorded_name: tool for tool in tools if isinstance(tool, Toolkit)}
+    missing = targets - toolkits.keys()
+    # A toolkit with no account behind it has nothing to disconnect.
+    needed = [target for target in targets - missing if getattr(toolkits[target], "auth", False)]
+    status = connections(needed) if needed else {}
+    return missing | {target for target in needed if not status.get(target)}
 
 
 def requirements_for(paused_run: Any, tools: Optional[List[Any]]) -> List[RunRequirement]:

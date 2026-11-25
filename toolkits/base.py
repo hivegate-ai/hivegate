@@ -67,6 +67,11 @@ class BaseToolkit(Toolkit, ABC):
         """
         pass
 
+    @property
+    def recorded_name(self) -> str:
+        """The integration key. agno records it on each planned call, as the call's target."""
+        return self.service_name
+
     def __hash__(self) -> int:
         """
         Compute hash based on service_name, auth, and class name.

@@ -1,17 +1,19 @@
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
 import toolkits
 from agno.db.in_memory import InMemoryDb
+from agno.tools import Toolkit
 from anthropic.types import ContentBlockDeltaEvent, ContentBlockStopEvent, MessageStopEvent, ToolUseBlock
 from fastapi import FastAPI
 
 from agents import agent as agent_factory
 from agents.claude_refusal import RefusalAwareClaude
+from agents.hitl import approved_targets, unavailable_targets
 from api.routes.v2 import agents
 from api.services.models import PullPromptResponse
 from db.agent_info_crud import AgentConfig
@@ -19,9 +21,10 @@ from tests.test_hitl import _ScriptedClaude
 from tests.workspace_suite.helpers import make_mock_client
 from toolkits import tasks
 from toolkits.calendar import CalendarToolkit
-from toolkits.tasks import GOOGLE_TASKS
+from toolkits.tasks import GOOGLE_TASKS, MICROSOFT_TODO
 from toolkits.token_cache import TokenCache
 from workspace_suite.providers.google_tasks import GoogleTasksProvider
+from workspace_suite.providers.microsoft_todo import MicrosoftTodoProvider
 
 CHAT = "/v2/agents/tasks-agent/chat"
 OWNER = {"user_id": "alice", "session_id": "chat-session"}
@@ -109,6 +112,10 @@ def _serve_tasks_chat(monkeypatch, *tool_calls):
     monkeypatch.setattr(agents, "fetch_access_token", lambda user, key: "synthetic-chat-token")
     monkeypatch.setattr(
         agents, "has_access_tokens_batch", lambda user, keys: {key: key == GOOGLE_TASKS for key in keys}
+    )
+    # A commit reads the token rows through its own session; here both lookups agree.
+    monkeypatch.setattr(
+        agents, "has_user_tokens_batch", lambda db, user, keys: agents.has_access_tokens_batch(user, keys)
     )
     monkeypatch.setattr(agents, "record_usage", AsyncMock(return_value=None))
     monkeypatch.setattr(agents, "_agent_cache", {})
@@ -216,6 +223,153 @@ async def test_a_commit_from_another_chat_is_refused_and_leaves_the_run(app, mon
             assert reply.status_code == 200, reply.text
 
     assert dispatched == ([PATCHED] if confirmed else [])
+
+
+@asynccontextmanager
+async def _paused_update(app, monkeypatch, connected, stream):
+    """A chat paused on update_task, with Google and Microsoft both mocked.
+
+    `connected` is the set of connected integration keys, which a test can change. Yields the
+    gateway client, the chat request, the paused run id and the writes that reached each provider.
+    """
+    provider_http, google, _ = _serve_tasks_chat(
+        monkeypatch, ToolUseBlock(type="tool_use", id="toolu_update", name="update_task", input=UPDATE)
+    )
+    microsoft = []
+
+    def todo_request(request):
+        microsoft.append((request.method, request.url.path))
+        return httpx.Response(200, json={"id": "task", "title": "null", "status": "notStarted"})
+
+    todo_http = make_mock_client(todo_request)
+    monkeypatch.setitem(
+        tasks._TASKS_PROVIDERS, MICROSOFT_TODO, lambda config: MicrosoftTodoProvider(config, http=todo_http)
+    )
+    monkeypatch.setattr(agents, "has_access_tokens_batch", lambda user, keys: {key: key in connected for key in keys})
+    message = {**OWNER, "stream": stream, "message": "Update task", "timezone": "UTC", "locale": "en"}
+
+    with provider_http, todo_http:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as gateway:
+            response = await gateway.post(CHAT, json=message)
+            assert response.status_code == 200, response.text
+            [run_id] = agents._run_cache
+            assert google == microsoft == []
+            yield gateway, message, run_id, {GOOGLE_TASKS: google, MICROSOFT_TODO: microsoft}
+
+
+def _decision(run_id, stream, confirmed=True):
+    return {
+        **OWNER,
+        "stream": stream,
+        "run_id": run_id,
+        "updated_tools": [{"tool_call_id": "toolu_update", "confirmed": confirmed}],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [True, False])
+async def test_an_approved_call_reaches_the_provider_it_was_planned_for(app, monkeypatch, stream):
+    connected = {MICROSOFT_TODO}
+    async with _paused_update(app, monkeypatch, connected, stream) as (gateway, message, run_id, writes):
+        assert [tool.toolkit for tool in agents._run_cache[run_id].run.tools] == [MICROSOFT_TODO]
+
+        # Google is now first choice, and another message moves the shared agent to it.
+        connected.add(GOOGLE_TASKS)
+        assert (await gateway.post(CHAT, json=message)).status_code == 200
+        [shared] = agents._agent_cache.values()
+        tools = list(shared.tools)
+        assert [t.service_name for t in tools if isinstance(t, tasks.TasksToolkit)] == [GOOGLE_TASKS]
+
+        reply = await gateway.post(CHAT + "/commit", json=_decision(run_id, stream))
+        assert reply.status_code == 200, reply.text
+
+        assert len(writes[MICROSOFT_TODO]) == 1
+        assert writes[GOOGLE_TASKS] == []
+        # The chat itself stays on Google.
+        assert list(agents._agent_cache.values()) == [shared]
+        assert shared.tools == tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [True, False])
+@pytest.mark.parametrize("another_message", [True, False])
+@pytest.mark.parametrize("now_connected", [[], [MICROSOFT_TODO]])
+async def test_an_approval_for_a_disconnected_provider_runs_nothing(
+    app, monkeypatch, now_connected, another_message, stream
+):
+    connected = {GOOGLE_TASKS}
+    async with _paused_update(app, monkeypatch, connected, stream) as (gateway, message, run_id, writes):
+        # A cached token outlives its connection.
+        toolkits.token_cache.get_token(GOOGLE_TASKS, "alice", lambda: "synthetic-chat-token")
+        connected.clear()
+        connected.update(now_connected)
+        if another_message:
+            assert (await gateway.post(CHAT, json=message)).status_code == 200
+
+        refused = await gateway.post(CHAT + "/commit", json=_decision(run_id, stream))
+        assert refused.status_code == 409, refused.text
+        assert "send your request again" in refused.json()["detail"]
+
+        # The run is released: reconnecting doesn't revive the approval.
+        connected.add(GOOGLE_TASKS)
+        again = await gateway.post(CHAT + "/commit", json=_decision(run_id, stream))
+        assert again.status_code == 410, again.text
+        assert writes == {GOOGLE_TASKS: [], MICROSOFT_TODO: []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [True, False])
+async def test_a_decline_needs_no_connection(app, monkeypatch, stream):
+    connected = {GOOGLE_TASKS}
+    async with _paused_update(app, monkeypatch, connected, stream) as (gateway, _, run_id, writes):
+        connected.clear()
+        reply = await gateway.post(CHAT + "/commit", json=_decision(run_id, stream, confirmed=False))
+        assert reply.status_code == 200, reply.text
+        assert writes == {GOOGLE_TASKS: [], MICROSOFT_TODO: []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [True, False])
+async def test_a_failed_connection_lookup_keeps_the_run(app, monkeypatch, stream):
+    async with _paused_update(app, monkeypatch, {GOOGLE_TASKS}, stream) as (gateway, _, run_id, writes):
+        with monkeypatch.context() as outage:
+            outage.setattr(agents, "has_user_tokens_batch", Mock(side_effect=RuntimeError("database down")))
+            failed = await gateway.post(CHAT + "/commit", json=_decision(run_id, stream))
+        assert failed.status_code == 500, failed.text
+        assert writes[GOOGLE_TASKS] == []
+
+        reply = await gateway.post(CHAT + "/commit", json=_decision(run_id, stream))
+        assert reply.status_code == 200, reply.text
+        assert writes[GOOGLE_TASKS] == [PATCHED]
+
+
+def test_only_approved_calls_need_their_target():
+    calls = [
+        SimpleNamespace(toolkit="approved", confirmed=True, result=None),
+        SimpleNamespace(toolkit="already run", confirmed=True, result="done"),
+        SimpleNamespace(toolkit="declined", confirmed=False, result=None),
+        SimpleNamespace(toolkit="undecided", confirmed=None, result=None),
+        SimpleNamespace(toolkit=None, confirmed=True, result=None),  # a plain function
+    ]
+    assert approved_targets(SimpleNamespace(tools=calls)) == {"approved"}
+    assert approved_targets(SimpleNamespace(tools=None)) == set()
+
+
+def test_a_target_is_unavailable_when_disconnected_or_not_among_the_runs_tools():
+    google = tasks.TasksToolkit("alice", GOOGLE_TASKS)
+    prompt = tasks.TasksToolkit("alice", "tasks", auth=False)
+    asked = []
+
+    def connections(keys):
+        asked.append(keys)
+        return {GOOGLE_TASKS: True}
+
+    tools = [google, Toolkit(name="plain"), prompt, print]
+    assert unavailable_targets({GOOGLE_TASKS, "plain", "tasks"}, tools, connections) == set()
+    # Only toolkits with an account behind them are looked up.
+    assert asked == [[GOOGLE_TASKS]]
+    assert unavailable_targets({GOOGLE_TASKS, MICROSOFT_TODO}, tools, connections) == {MICROSOFT_TODO}
+    assert unavailable_targets({GOOGLE_TASKS}, tools, lambda keys: {}) == {GOOGLE_TASKS}
 
 
 @pytest.mark.asyncio

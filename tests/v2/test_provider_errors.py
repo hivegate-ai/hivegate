@@ -50,6 +50,7 @@ class Runner:
     def __init__(self, result=None, events=(), exception=None):
         self.id = "provider-test"
         self.model = SimpleNamespace(id=MODEL, provider="Google")
+        self.tools = None
         self.result = result
         self.events = events
         self.exception = exception

@@ -311,6 +311,13 @@ The run resumes as with any other commit, even when every call is declined. A de
 }
 ```
 
+**Response (Connection Gone)**: On the gateway's agent commit route, for an agent without MCP servers, an approved call runs against the provider it was planned for, even if another provider has been connected since. If that provider is no longer connected, the commit returns a 409, nothing runs, and the paused run is dropped:
+```json
+{
+  "detail": "The connection this action was approved for is no longer available. Please send your request again."
+}
+```
+
 **Example cURL**:
 ```bash
 curl -X POST http://localhost:8080/chat/commit \

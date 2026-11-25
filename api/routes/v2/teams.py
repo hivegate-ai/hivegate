@@ -1023,7 +1023,7 @@ async def commit_team_run_v2(
 
             # A cached run resumes even when every call is declined: agno reports the
             # declined calls to the model as rejected, and the model replies.
-            cached_run, run_context = _team_run_cache[body.run_id]
+            cached_run, run_context, _ = _team_run_cache[body.run_id]
 
         # Only the chat that started the run may decide its calls. Checked before anything is
         # changed, so a refused commit leaves the run as it was.
