@@ -228,3 +228,50 @@ def test_cli_shows_chunked_streaming_errors(monkeypatch, capsys, stream_kind, st
     [response] = responses
     assert response.is_stream_consumed
     assert response.is_closed
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_cli_commit_command_has_nothing_to_resend_after_a_committed_batch(monkeypatch, capsys, stream):
+    client, select = _client(monkeypatch, ("confirm", "confirm"), stream)
+
+    [_] = _run(monkeypatch, client, stream, COMPLETED_REPLY)
+    capsys.readouterr()
+
+    assert client._last_run_id is None and client._last_tools_payload == []
+    client.handle_command("/commit")
+
+    assert "nothing to commit" in capsys.readouterr().out
+    assert select.call_count == 2  # no new prompts
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_cli_commit_command_keeps_the_batch_when_the_commit_request_fails(monkeypatch, stream):
+    client, _ = _client(monkeypatch, ("confirm", "confirm"), stream)
+    transport_client = httpx.Client
+
+    def transport(request):
+        if request.url.path.endswith("/commit"):
+            return httpx.Response(500, text="boom")
+        return httpx.Response(200, text=_sse({"event": "RunStarted", "run_id": "run"}, PAUSED))
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: transport_client(transport=httpx.MockTransport(transport)))
+    monkeypatch.setattr(requests, "post", lambda *a, **k: SimpleNamespace(status_code=500, text="boom"))
+    if stream:
+        client.handle_sse_stream("Update task")
+    else:
+        client.handle_single_response(PAUSED)
+
+    # A failed commit was never accepted, so /commit can still retry it.
+    assert client._last_run_id == "run"
+    assert len(client._last_tools_payload) == 3
+
+
+def test_cli_commit_command_offers_a_later_paused_batch_after_a_commit(monkeypatch):
+    client, _ = _client(monkeypatch, ("confirm", "confirm", "cancel"), stream=False)
+    later = {**PAUSED, "run_id": "run-2", "tools": [_pending(2, "delete_task", DELETE)]}
+
+    [_] = _run(monkeypatch, client, False, later)
+
+    # The commit reply paused again; the user cancelled, so that new batch (not the old one) is pending.
+    assert client._last_run_id == "run-2"
+    assert [t["tool_call_id"] for t in client._last_tools_payload] == ["call-2"]
