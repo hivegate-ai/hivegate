@@ -26,7 +26,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
-from agents.hitl import requirements_for
+from agents.hitl import CachedRun, ChatContext, requirements_for
 from agents.mcp_validation import SUPPORTED_MCP_TRANSPORTS, mcp_url_problem, normalize_mcp_transport
 from agents.agent import build_mcp_toolkits, connect_mcp_toolkits, get_agent_db
 from agents.agent import get_agent as get_agent_impl
@@ -69,7 +69,7 @@ from toolkits.tasks import TasksToolkit
 # Agent caching infrastructure
 _agent_cache: Dict[str, Agent] = {}
 _cache_lock = Lock()
-_run_cache: Dict[str, Any] = {}
+_run_cache: Dict[str, CachedRun] = {}
 
 # Toolkit execution cache for confirmation flow
 _toolkit_execution_cache: Dict[str, Dict[str, Any]] = {}
@@ -787,6 +787,7 @@ async def chat_response_streamer_v2(
     body: ChatRequest,
     db: Session = Depends(get_db),
     usage_ctx: Optional[usage_service.UsageContext] = None,
+    chat_context: Optional[ChatContext] = None,
 ) -> AsyncGenerator:
     """
     Stream agent responses chunk by chunk (v2 implementation).
@@ -893,7 +894,7 @@ async def chat_response_streamer_v2(
 
                 # Cache the run for later commit if run_id is present
                 if "run_id" in event_data and event_data["run_id"]:
-                    _run_cache[event_data["run_id"]] = chunk
+                    _run_cache[event_data["run_id"]] = CachedRun(chunk, chat_context)
 
                 # Process tools using shared helper function
                 _process_tools_in_event(event_data)
@@ -934,6 +935,7 @@ async def _mcp_chat_streamer(
     body: "ChatRequest",
     db: Session,
     usage_ctx: Optional[usage_service.UsageContext] = None,
+    chat_context: Optional[ChatContext] = None,
 ) -> AsyncGenerator:
     """Stream an MCP-tool agent: connect the MCP session(s), build the agent with the
     connected toolkits, then delegate to chat_response_streamer_v2. The AsyncExitStack
@@ -954,7 +956,7 @@ async def _mcp_chat_streamer(
                 {"status": "error", "error": "MCP tool server unavailable"},
             )
             return
-        async with aclosing(chat_response_streamer_v2(agent, body, db, usage_ctx)) as events:
+        async with aclosing(chat_response_streamer_v2(agent, body, db, usage_ctx, chat_context)) as events:
             async for event in events:
                 yield event
 
@@ -1129,6 +1131,7 @@ async def chat_with_agent_v2(
     """
     # Who is calling, for the per-call cost record (api/services/usage.py).
     usage_ctx = usage_service.context_for(agent_id, body, api_key)
+    chat_context = ChatContext(api_key.id if api_key else None, body.user_id, body.session_id, agent_id)  # type: ignore[arg-type]
     try:
         logging.info(f"Creating v2 chat request for agent_id: {_log_safe(agent_id)}")
         logging.debug(f"ChatRequest: {_log_safe(body)}")
@@ -1167,7 +1170,7 @@ async def chat_with_agent_v2(
             if body.stream:
                 logging.info(f"Returning v2 streaming response (MCP) for agent: {_log_safe(agent_id)}")
                 return StreamingResponse(
-                    _mcp_chat_streamer(_build_mcp_agent, mcp_toolkits, body, db, usage_ctx),
+                    _mcp_chat_streamer(_build_mcp_agent, mcp_toolkits, body, db, usage_ctx, chat_context),
                     media_type="text/event-stream",
                 )
 
@@ -1212,7 +1215,7 @@ async def chat_with_agent_v2(
                 if failure_response is not None:
                     return failure_response
                 if hasattr(response, "run_id") and response.run_id:
-                    _run_cache[response.run_id] = response
+                    _run_cache[response.run_id] = CachedRun(response, chat_context)
                 tools_dict = []
                 if hasattr(response, "tools") and response.tools:
                     for tool in response.tools:
@@ -1260,7 +1263,7 @@ async def chat_with_agent_v2(
         if body.stream:
             logging.info(f"Returning v2 streaming response for agent: {_log_safe(agent_id)}")
             return StreamingResponse(
-                chat_response_streamer_v2(agent, body, db, usage_ctx),
+                chat_response_streamer_v2(agent, body, db, usage_ctx, chat_context),
                 media_type="text/event-stream",
             )
         else:
@@ -1350,7 +1353,7 @@ async def chat_with_agent_v2(
 
             # Cache the run for later commit
             if hasattr(response, "run_id") and response.run_id:
-                _run_cache[response.run_id] = response
+                _run_cache[response.run_id] = CachedRun(response, chat_context)
 
             # Convert tools to dict format
             tools_dict = []
@@ -1665,7 +1668,14 @@ async def commit_agent_chat_v2(
 
         # A cached run resumes even when every call is declined: agno reports the
         # declined calls to the model as rejected, and the model replies.
-        cached_run = _run_cache[body.run_id]
+        cached_run, run_context = _run_cache[body.run_id]
+
+        # Only the chat that started the run may decide its calls. Checked before anything is
+        # changed, so a refused commit leaves the run as it was.
+        chat_context = ChatContext(api_key.id if api_key else None, body.user_id, body.session_id, agent_id)  # type: ignore[arg-type]
+        if chat_context != run_context:
+            logging.warning(f"Commit refused: run {_log_safe(body.run_id)} belongs to a different chat")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This run belongs to a different chat.")
 
         # Update tools with user confirmations/edits
         UPDATABLE_FIELDS = {"tool_args", "args", "confirmed", "confirmation_note"}
