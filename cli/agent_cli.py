@@ -862,6 +862,11 @@ class ConsoleChatClient:
         # Return original if we can't parse it
         return result
 
+    def _clear_committed_batch(self):
+        """Forget the batch /commit would reopen. A later paused batch is remembered again when it arrives."""
+        self._last_tools_payload = []
+        self._last_run_id = None
+
     def _prompt_and_commit_tools_if_needed(self, data: Dict[str, Any]):
         """
         If server returned confirmable tool calls, prompt the user to confirm/edit,
@@ -1000,6 +1005,8 @@ class ConsoleChatClient:
                 print(f"[error] {r.status_code}: {r.text}")
                 return
 
+            # The gateway accepted the batch: /commit must not offer it again
+            self._clear_committed_batch()
             resp = r.json()
             self.handle_single_response(resp)
 
@@ -1208,6 +1215,9 @@ class ConsoleChatClient:
                         response.read()
                         print(f"[error] {response.status_code}: {response.text}")
                         return
+
+                    # The gateway accepted the batch: /commit must not offer it again
+                    self._clear_committed_batch()
 
                     # The gateway answers in JSON, even for a streaming commit, when every call
                     # is declined for a run that is no longer cached
