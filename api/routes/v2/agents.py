@@ -1697,7 +1697,7 @@ async def commit_agent_chat_v2(
         if run_tools is not None:
             gone = unavailable_targets(
                 approved_targets(cached_run),
-                cast(List[Any], run_tools),
+                run_tools,
                 lambda targets: has_user_tokens_batch(db, cast(str, body.user_id), targets),
             )
             if gone:

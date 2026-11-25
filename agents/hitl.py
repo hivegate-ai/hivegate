@@ -48,15 +48,15 @@ def approved_targets(run: Any) -> Set[str]:
     return {tool.toolkit for tool in run.tools or [] if tool.confirmed and tool.result is None and tool.toolkit}
 
 
-def unavailable_targets(
-    targets: Set[str], tools: List[Any], connections: Callable[[List[str]], Dict[str, bool]]
-) -> Set[str]:
+def unavailable_targets(targets: Set[str], tools: Any, connections: Callable[[List[str]], Dict[str, bool]]) -> Set[str]:
     """The targets a run can't dispatch to: not among its tools, or disconnected since it was planned.
 
     `connections` says which of the given targets the user has connected now. It must not be
     answered from a token cache: a cached token outlives its connection. It should raise if it
     can't tell, so that an outage isn't taken for a disconnect.
     """
+    if not isinstance(tools, list):
+        return targets  # agno also takes a callable, whose tools can't be checked here
     toolkits = {tool.recorded_name: tool for tool in tools if isinstance(tool, Toolkit)}
     missing = targets - toolkits.keys()
     # A toolkit with no account behind it has nothing to disconnect.

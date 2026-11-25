@@ -370,6 +370,9 @@ def test_a_target_is_unavailable_when_disconnected_or_not_among_the_runs_tools()
     assert asked == [[GOOGLE_TASKS]]
     assert unavailable_targets({GOOGLE_TASKS, MICROSOFT_TODO}, tools, connections) == {MICROSOFT_TODO}
     assert unavailable_targets({GOOGLE_TASKS}, tools, lambda keys: {}) == {GOOGLE_TASKS}
+    # Tools that aren't a list can't be checked, so an approved call is refused.
+    assert unavailable_targets({GOOGLE_TASKS}, lambda: tools, connections) == {GOOGLE_TASKS}
+    assert unavailable_targets(set(), lambda: tools, connections) == set()
 
 
 @pytest.mark.asyncio
