@@ -423,7 +423,8 @@ HiveGate is built in the open, and these people have contributed to it:
   evict the stale cached token and keep raw OAuth errors out of refresh failures (#230), and
   made declining every call in a paused run resume it so the model can reply (#254), and added
   a Decline choice to the CLI's confirmation dialog (#257), and made the CLI print the gateway's
-  JSON reply to a streaming commit (#259)
+  JSON reply to a streaming commit (#259), and made a commit accepted only from the chat that
+  started the run: same API key, user, session and agent or team (#266)
 - [@arpitkjaiswal](https://github.com/arpitkjaiswal) — documented the Bright Data toolkit's three
   settings in the README's Environment Variables table (#147)
 - [@rayulumukku](https://github.com/rayulumukku) — made a chat agent with an MCP server it can't
@@ -435,7 +436,9 @@ HiveGate is built in the open, and these people have contributed to it:
   key (#238), and made chat honour a request's `system_prompt` and `tools` while agno builds the
   full system prompt around the stored one (#237)
 - [@InesZenkri](https://github.com/InesZenkri) — made the console CLI print a streaming request's
-  error reply (`[error] 410: ...`) instead of crashing with `ResponseNotRead` (#262)
+  error reply (`[error] 410: ...`) instead of crashing with `ResponseNotRead` (#262), and made the
+  CLI's `/commit` say there is nothing to commit instead of resending a batch the gateway already
+  accepted (#267)
 
 There are [good first issues](https://github.com/hivegate-ai/hivegate/labels/good%20first%20issue)
 open now, each small and self-contained. Comment on one and it's yours.
