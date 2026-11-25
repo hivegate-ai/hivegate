@@ -197,7 +197,9 @@ class TestSupervisorTeamRun(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["status"], "PAUSED")
         # A paused run must be cached for /runs/commit and its tool registered for approval.
-        self.assertIs(teams_module._team_run_cache.pop("run-paused-456"), mock_response)
+        cached = teams_module._team_run_cache.pop("run-paused-456")
+        self.assertIs(cached.run, mock_response)
+        self.assertEqual(cached.context, (None, "anonymous", "session_sup-team", "sup-team"))
         mock_register.assert_called_once()
         self.assertEqual(data["run_id"], "run-paused-456")
         self.assertIsNotNone(data["tools"])

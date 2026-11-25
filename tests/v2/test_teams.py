@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from agents.hitl import CachedRun, ChatContext
 from db.db_models import AgentInfoDB, TeamAgentDB, TeamInfoDB
 from tests.test_utils import create_test_client
 
@@ -831,6 +832,8 @@ class TestV2TeamRunsAPI(unittest.TestCase):
             tool_call_id="call_1", tool_name="delete_budget", tool_args={"budget_id": 7}, requires_confirmation=True
         )
         cached_run = SimpleNamespace(tools=[tool], requirements=None)
+        # Fields the request leaves out get the same defaults on the run and on its commit.
+        context = ChatContext(None, "anonymous", "session_test-team", "test-team")
         mock_get_team.return_value = TeamInfoDB(id="test-team", name="Test Team")
         mock_get_agents.return_value = [TeamAgentDB(team_id="test-team", agent_id="agent-1", order_index=0)]
         team = MagicMock()
@@ -838,7 +841,9 @@ class TestV2TeamRunsAPI(unittest.TestCase):
         mock_create_team.return_value = team
         mock_record.return_value = None
 
-        with patch.dict("api.routes.v2.teams._team_run_cache", {"run-1": cached_run}, clear=True) as cache:
+        with patch.dict(
+            "api.routes.v2.teams._team_run_cache", {"run-1": CachedRun(cached_run, context)}, clear=True
+        ) as cache:
             response = self.client.post(
                 "/v2/teams/test-team/runs/commit",
                 json={
@@ -856,6 +861,82 @@ class TestV2TeamRunsAPI(unittest.TestCase):
         [requirement] = team.acontinue_run.await_args.kwargs["requirements"]
         self.assertIs(requirement.confirmation, False)
         self.assertEqual(requirement.confirmation_note, "No")
+
+    @patch("api.routes.v2.teams.get_team_info")
+    def test_tm_057_commit_from_another_chat_is_refused(self, mock_get_team):
+        """TM-057: Commit - a run from another chat is refused and left as it was."""
+        from agno.models.response import ToolExecution
+
+        from api.routes.v2 import teams
+
+        self.client.app.dependency_overrides[teams.get_api_key] = lambda: SimpleNamespace(id=2, scopes=None)
+        self.addCleanup(self.client.app.dependency_overrides.pop, teams.get_api_key)
+        mock_get_team.return_value = None  # a commit that passes the check stops here with a 404
+
+        for confirmed in (True, False):
+            for context in (
+                ChatContext(1, "alice", "s1", "test-team"),
+                ChatContext(None, "alice", "s1", "test-team"),
+                ChatContext(2, "bob", "s1", "test-team"),
+                ChatContext(2, "alice", "s2", "test-team"),
+                ChatContext(2, "alice", "s1", "other-team"),
+                None,
+            ):
+                tool = ToolExecution(tool_call_id="call_1", tool_name="delete_budget", tool_args={"budget_id": 7})
+                cached = CachedRun(SimpleNamespace(tools=[tool], requirements=None), context)
+                decision = {"tool_call_id": "call_1", "confirmed": confirmed, "tool_args": {"budget_id": 8}}
+                with (
+                    self.subTest(context=context, confirmed=confirmed),
+                    patch.dict("api.routes.v2.teams._team_run_cache", {"run-1": cached}, clear=True) as cache,
+                ):
+                    response = self.client.post(
+                        "/v2/teams/test-team/runs/commit",
+                        json={"run_id": "run-1", "updated_tools": [decision], "user_id": "alice", "session_id": "s1"},
+                    )
+
+                    self.assertEqual(response.status_code, 403, response.text)
+                    self.assertIs(cache["run-1"], cached)
+                    self.assertIsNone(tool.confirmed)
+                    self.assertEqual(tool.tool_args, {"budget_id": 7})
+        mock_get_team.assert_not_called()
+
+        run = SimpleNamespace(tools=[], requirements=None)
+        own = CachedRun(run, ChatContext(2, "alice", "s1", "test-team"))
+        with patch.dict("api.routes.v2.teams._team_run_cache", {"run-1": own}, clear=True):
+            response = self.client.post(
+                "/v2/teams/test-team/runs/commit",
+                json={"run_id": "run-1", "updated_tools": [], "user_id": "alice", "session_id": "s1"},
+            )
+        self.assertEqual(response.status_code, 404, response.text)
+
+    @patch("api.routes.v2.teams.record_usage", new_callable=AsyncMock, return_value=None)
+    @patch("api.routes.v2.teams.create_team")
+    @patch("api.routes.v2.teams.get_db_url", return_value="postgresql://test")
+    @patch("api.routes.v2.teams.get_agent")
+    @patch("api.routes.v2.teams.get_team_agents")
+    @patch("api.routes.v2.teams.get_team_info")
+    def test_tm_058_streamed_pause_keeps_its_chat(
+        self, mock_get_team, mock_get_agents, mock_get_agent, mock_db_url, mock_create_team, mock_record
+    ):
+        """TM-058: A member's streamed pause is cached under both run ids with the chat that started it."""
+        from agno.run.agent import RunPausedEvent
+
+        mock_get_team.return_value = TeamInfoDB(id="test-team", name="Test Team")
+        mock_get_agents.return_value = [TeamAgentDB(team_id="test-team", agent_id="agent-1", order_index=0)]
+        paused = RunPausedEvent(run_id="member-run", parent_run_id="team-run", session_id="s1")
+
+        async def events(*args, **kwargs):
+            yield paused
+
+        mock_create_team.return_value = MagicMock(arun=events)
+
+        with patch.dict("api.routes.v2.teams._team_run_cache", {}, clear=True) as cache:
+            response = self.client.post(
+                "/v2/teams/test-team/runs", json={"message": "hi", "user_id": "alice", "session_id": "s1"}
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            expected = CachedRun(paused, ChatContext(None, "alice", "s1", "test-team"))
+            self.assertEqual(dict(cache), {"member-run": expected, "team-run": expected})
 
 
 if __name__ == "__main__":

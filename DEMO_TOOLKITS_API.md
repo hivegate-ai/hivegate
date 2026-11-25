@@ -304,6 +304,13 @@ The run resumes as with any other commit, even when every call is declined. A de
 }
 ```
 
+**Response (Different Chat)**: On the gateway's agent and team commit routes, a commit must come from the chat that started the run: the same API key (when auth is on), `user_id`, `session_id`, and agent or team in the URL. Otherwise, while the run is cached, it returns a 403 and changes nothing, so the original chat can still commit the run:
+```json
+{
+  "detail": "This run belongs to a different chat."
+}
+```
+
 **Example cURL**:
 ```bash
 curl -X POST http://localhost:8080/chat/commit \

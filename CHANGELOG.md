@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completed run. Like any commit, a declined one now calls the model, so it is metered, and a
   model error leaves the run paused for a retry. A commit that declines every call for a run
   that is no longer cached still gets the `cancelled` reply (#245)
+- The agent and team commit routes now accept a decision only from the chat that started the run:
+  the same API key (when auth is on), `user_id`, `session_id`, and agent or team id. While the
+  run is cached, a commit from any other chat gets a 403 and leaves the run as it was. Before, a
+  different API key could commit the run, and a commit for a different user or session could mark
+  its calls approved even though it then failed. A client that commits with a different key than
+  it chatted with will now get the 403 (#253)
 
 ### Fixed
 - Leaving `SERVICE_PROMPTS` unset no longer fills the log with `PromptsServiceClient not properly
