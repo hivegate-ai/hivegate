@@ -5,7 +5,7 @@ import logging
 from contextlib import aclosing
 from functools import lru_cache
 from threading import Lock
-from typing import Any, AsyncGenerator, Dict, List, Optional, cast
+from typing import Any, AsyncGenerator, Dict, List, Optional, cast, Union
 
 from agno.db.postgres import PostgresDb
 from agno.memory import MemoryManager
@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from agents import DEFAULT_MODEL, Model
 from agents.gemini_api import gemini_client_params
 from agents.provider_models import humanize_billing_error
-from agents.hitl import requirements_for
+from agents.hitl import CachedRun, ChatContext, requirements_for
 from agents.model_resolver import resolve_model_id
 from agents.v2_selector import get_agent
 from api.provider_errors import error_payload, failed_run_response, run_error_event
@@ -56,7 +56,7 @@ from db.url import get_db_url
 from supervisor.approval import ApprovalNotification, register_pending_approval
 
 # Team run cache for confirmation flow
-_team_run_cache: Dict[str, Any] = {}
+_team_run_cache: Dict[str, CachedRun] = {}
 _team_run_cache_lock = Lock()
 
 ######################################################
@@ -210,6 +210,18 @@ class AddMemberResponse(BaseModel):
 
     message: str
     member: MemberResponse
+
+
+def _team_chat_context(
+    team_id: str, body: Union[TeamRunRequest, TeamCommitRequest], api_key: Optional[ApiKeyDB]
+) -> ChatContext:
+    """The chat a team request belongs to, with the defaults create_team gets."""
+    return ChatContext(
+        api_key.id if api_key else None,  # type: ignore[arg-type]
+        body.user_id or "anonymous",
+        body.session_id or f"session_{team_id}",
+        team_id,
+    )
 
 
 def _register_paused_approvals(
@@ -581,6 +593,7 @@ async def team_response_streamer(
     message: str,
     db: Session = Depends(get_db),
     usage_ctx: Optional[usage_service.UsageContext] = None,
+    chat_context: Optional[ChatContext] = None,
 ) -> AsyncGenerator:
     """
     Stream team responses chunk by chunk (SSE format).
@@ -638,7 +651,7 @@ async def team_response_streamer(
                 if "run_id" in event_data and event_data["run_id"]:
                     try:
                         with _team_run_cache_lock:
-                            _team_run_cache[event_data["run_id"]] = chunk
+                            _team_run_cache[event_data["run_id"]] = CachedRun(chunk, chat_context)
                             logging.debug(f"Cached team run {event_data['run_id']} for commit")
 
                             # If this is a child agent's RunPaused event (has parent_run_id), also cache by parent_run_id
@@ -648,7 +661,7 @@ async def team_response_streamer(
                                 and "parent_run_id" in event_data
                                 and event_data["parent_run_id"]
                             ):
-                                _team_run_cache[event_data["parent_run_id"]] = chunk
+                                _team_run_cache[event_data["parent_run_id"]] = CachedRun(chunk, chat_context)
                                 logging.debug(
                                     f"Child agent paused - also cached by parent run_id {event_data['parent_run_id']}"
                                 )
@@ -802,6 +815,7 @@ async def create_team_run_v2(
     """
     logging.info(f"Creating v2 team run for team_id: {_log_safe(team_id)}")
     logging.debug(f"TeamRunRequest: {_log_safe(body)}")
+    chat_context = _team_chat_context(team_id, body, api_key)
 
     # Validate team exists in database first
     db_team = get_team_info(db, team_id)
@@ -888,7 +902,7 @@ async def create_team_run_v2(
         logging.info(f"Returning v2 streaming response for team: {_log_safe(team_id)}")
         return StreamingResponse(
             team_response_streamer(
-                team, body.message, db, usage_service.context_for(team_id, body, api_key, kind="team")
+                team, body.message, db, usage_service.context_for(team_id, body, api_key, kind="team"), chat_context
             ),
             media_type="text/event-stream",
         )
@@ -936,7 +950,7 @@ async def create_team_run_v2(
         # Cache the run for later commit if status is paused. RunStatus.paused is "PAUSED".
         if response_run_id and response_status == RunStatus.paused:
             with _team_run_cache_lock:
-                _team_run_cache[response_run_id] = response
+                _team_run_cache[response_run_id] = CachedRun(response, chat_context)
                 logging.debug(f"Cached team run {response_run_id} for commit")
 
             # Register pending tools as approval notifications
@@ -1009,7 +1023,13 @@ async def commit_team_run_v2(
 
             # A cached run resumes even when every call is declined: agno reports the
             # declined calls to the model as rejected, and the model replies.
-            cached_run = _team_run_cache[body.run_id]
+            cached_run, run_context = _team_run_cache[body.run_id]
+
+        # Only the chat that started the run may decide its calls. Checked before anything is
+        # changed, so a refused commit leaves the run as it was.
+        if _team_chat_context(team_id, body, api_key) != run_context:
+            logging.warning(f"Commit refused: run {_log_safe(body.run_id)} belongs to a different chat")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This run belongs to a different chat.")
 
         # Update tools with user confirmations/edits
         UPDATABLE_FIELDS = {"tool_args", "args", "confirmed", "confirmation_note"}

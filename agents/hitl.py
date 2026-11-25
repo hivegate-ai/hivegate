@@ -20,9 +20,25 @@ private `_sync_requirements_with_tools`, done here so it does not depend on a pr
 helper.
 """
 
-from typing import Any, List, Optional
+from typing import Any, List, NamedTuple, Optional
 
 from agno.run.requirement import RunRequirement
+
+
+class ChatContext(NamedTuple):
+    """The chat a run belongs to. Only a commit from the same chat may decide its tool calls."""
+
+    api_key_id: Optional[int]  # None when auth is off
+    user_id: str
+    session_id: str
+    target_id: str  # the agent or team id from the route
+
+
+class CachedRun(NamedTuple):
+    """A run kept for a later commit, with the chat that started it."""
+
+    run: Any
+    context: Optional[ChatContext]  # None matches no commit
 
 
 def requirements_for(paused_run: Any, tools: Optional[List[Any]]) -> List[RunRequirement]:

@@ -171,6 +171,54 @@ async def test_chat_approval_with_real_agno_and_tasks_toolkit(app, monkeypatch, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [True, False])
+@pytest.mark.parametrize("confirmed", [True, False])
+@pytest.mark.parametrize("changed", ["api_key", "user_id", "session_id", "agent_id"])
+async def test_a_commit_from_another_chat_is_refused_and_leaves_the_run(app, monkeypatch, changed, confirmed, stream):
+    provider_http, dispatched, model_requests = _serve_tasks_chat(
+        monkeypatch, ToolUseBlock(type="tool_use", id="toolu_update", name="update_task", input=UPDATE)
+    )
+    request = {**OWNER, "stream": stream}
+
+    with provider_http:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as gateway:
+            response = await gateway.post(
+                CHAT, json={**request, "message": "Update task", "timezone": "UTC", "locale": "en"}
+            )
+            assert response.status_code == 200, response.text
+            [(run_id, cached)] = agents._run_cache.items()
+            [tool] = cached.run.tools
+            decision = {"tool_call_id": tool.tool_call_id, "confirmed": confirmed}
+            commit = {**request, "run_id": run_id, "updated_tools": [decision]}
+            foreign = {
+                **commit,
+                "updated_tools": [{**decision, "tool_args": {"list_id": "other"}, "confirmation_note": "x"}],
+            }
+
+            path = CHAT
+            if changed == "api_key":
+                app.dependency_overrides[agents.get_api_key] = lambda: SimpleNamespace(id=2)
+            elif changed == "agent_id":
+                path = CHAT.replace("tasks-agent", "other-agent")
+            else:
+                foreign[changed] = "mallory"
+            refused = await gateway.post(path + "/commit", json=foreign)
+
+            assert refused.status_code == 403, refused.text
+            assert agents._run_cache == {run_id: cached}
+            assert (tool.confirmed, tool.confirmation_note, tool.tool_args) == (None, None, UPDATE)
+            assert dispatched == []
+            assert len(model_requests) == 1
+
+            # The chat that started the run can still decide it.
+            app.dependency_overrides[agents.get_api_key] = lambda: SimpleNamespace(id=1)
+            reply = await gateway.post(CHAT + "/commit", json=commit)
+            assert reply.status_code == 200, reply.text
+
+    assert dispatched == ([PATCHED] if confirmed else [])
+
+
+@pytest.mark.asyncio
 async def test_a_call_skipped_in_an_approved_batch_never_reaches_the_provider(app, monkeypatch):
     provider_http, dispatched, _ = _serve_tasks_chat(
         monkeypatch,

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agents.hitl import CachedRun, ChatContext
 from db.db_models import AgentInfoDB
 from tests.test_utils import create_test_client
 
@@ -553,7 +554,7 @@ class TestV2AgentsAPI(unittest.TestCase):
         # Add to run cache
         from api.routes.v2.agents import _run_cache
 
-        _run_cache["run_123"] = mock_run
+        _run_cache["run_123"] = CachedRun(mock_run, ChatContext(None, "user123", "session456", "test-agent-v2"))
 
         # Create mock agent with acontinue_run method
         mock_agent_instance = MagicMock()
@@ -939,7 +940,9 @@ class TestV2AgentsAPI(unittest.TestCase):
         """A commit sends the chat's system_prompt/tools so it resolves the same cached agent."""
         from api.routes.v2.agents import _run_cache
 
-        _run_cache["run_88"] = MagicMock(run_id="run_88", tools=[])
+        _run_cache["run_88"] = CachedRun(
+            MagicMock(run_id="run_88", tools=[]), ChatContext(None, "user123", "session456", "test-agent-v2")
+        )
 
         async def mock_acontinue_run(*args, **kwargs):
             from agno.metrics import RunMetrics as Metrics
@@ -1407,7 +1410,7 @@ class TestV2AgentsAPI(unittest.TestCase):
 
         from api.routes.v2.agents import _run_cache
 
-        _run_cache["run_edit_123"] = mock_run
+        _run_cache["run_edit_123"] = CachedRun(mock_run, ChatContext(None, "user123", "session456", "test-agent-v2"))
 
         mock_agent_instance = MagicMock()
         mock_agent_instance.session_id = "session456"
@@ -1483,7 +1486,7 @@ class TestV2AgentsAPI(unittest.TestCase):
 
         from api.routes.v2.agents import _run_cache
 
-        _run_cache["run_reject_123"] = mock_run
+        _run_cache["run_reject_123"] = CachedRun(mock_run, ChatContext(None, "user123", "session456", "test-agent-v2"))
 
         mock_agent_instance = MagicMock()
         mock_agent_instance.session_id = "session456"
