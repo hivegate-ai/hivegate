@@ -424,7 +424,8 @@ HiveGate is built in the open, and these people have contributed to it:
   made declining every call in a paused run resume it so the model can reply (#254), and added
   a Decline choice to the CLI's confirmation dialog (#257), and made the CLI print the gateway's
   JSON reply to a streaming commit (#259), and made a commit accepted only from the chat that
-  started the run: same API key, user, session and agent or team (#266)
+  started the run: same API key, user, session and agent or team (#266), and made an approved
+  call run only against the provider it was planned for, or answer 409 if that provider is gone (#269)
 - [@arpitkjaiswal](https://github.com/arpitkjaiswal) — documented the Bright Data toolkit's three
   settings in the README's Environment Variables table (#147)
 - [@rayulumukku](https://github.com/rayulumukku) — made a chat agent with an MCP server it can't
