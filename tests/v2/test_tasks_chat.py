@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+import anthropic
 import httpx
 import pytest
 import toolkits
@@ -175,6 +176,53 @@ async def test_chat_approval_with_real_agno_and_tasks_toolkit(app, monkeypatch, 
     assert result["tool_use_id"] == "toolu_update"
     # The model is told why the call didn't run.
     assert (result["content"] == "Not this one") is (not approve)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("approve", [True, False])
+@pytest.mark.parametrize("stream", [True, False])
+async def test_a_failed_model_call_on_commit_answers_like_chat_and_drops_the_run(app, monkeypatch, approve, stream):
+    provider_http, dispatched, _ = _serve_tasks_chat(
+        monkeypatch, ToolUseBlock(type="tool_use", id="toolu_update", name="update_task", input=UPDATE)
+    )
+    request = {**OWNER, "stream": stream}
+
+    with provider_http:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as gateway:
+            response = await gateway.post(
+                CHAT, json={**request, "message": "Update task", "timezone": "UTC", "locale": "en"}
+            )
+            assert response.status_code == 200, response.text
+            [(run_id, cached)] = agents._run_cache.items()
+            [tool] = cached.run.tools
+
+            # The provider fails on the call that follows the decision.
+            def fail(**kwargs):
+                sent = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+                raise anthropic.InternalServerError(
+                    "secret-provider-detail", response=httpx.Response(500, request=sent), body=None
+                )
+
+            model = agent_factory.create_model()
+            model.get_async_client = lambda: SimpleNamespace(messages=SimpleNamespace(create=fail, stream=fail))
+            decision = {"tool_call_id": tool.tool_call_id, "confirmed": approve}
+            reply = await gateway.post(
+                CHAT + "/commit", json={**request, "run_id": run_id, "updated_tools": [decision]}
+            )
+
+    if stream:
+        assert reply.status_code == 200, reply.text
+        frames = reply.text.strip().split("\n\n")
+        assert frames[-1].startswith("event: error\n")
+        error = json.loads(frames[-1].split("data: ", 1)[1])
+    else:
+        assert reply.status_code == 502, reply.text
+        error = reply.json()
+    assert error["error_code"] == "model_provider_error"
+    assert "secret-provider-detail" not in reply.text
+    # The run is dropped, and an approved call ran before the model failed.
+    assert run_id not in agents._run_cache
+    assert dispatched == ([PATCHED] if approve else [])
 
 
 @pytest.mark.asyncio

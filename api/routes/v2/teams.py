@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session
 
 from agents import DEFAULT_MODEL, Model
 from agents.gemini_api import gemini_client_params
-from agents.provider_models import humanize_billing_error
 from agents.hitl import CachedRun, ChatContext, requirements_for
 from agents.model_resolver import resolve_model_id
 from agents.v2_selector import get_agent
@@ -737,34 +736,43 @@ async def commit_team_response_streamer(
     collector.input_text = "[commit continuation]"
 
     try:
-        async for chunk in run_response:
-            # Skip None chunks
-            if chunk is None:
-                continue
+        async with aclosing(cast(AsyncGenerator[Any, None], run_response)):
+            async for chunk in run_response:
+                # Skip None chunks
+                if chunk is None:
+                    continue
 
-            chunk_count += 1
-            if chunk_count % 10 == 0:  # Log every 10 chunks to avoid excessive logging
-                logging.debug(f"Team streaming commit chunk #{chunk_count}")
+                chunk_count += 1
+                if chunk_count % 10 == 0:  # Log every 10 chunks to avoid excessive logging
+                    logging.debug(f"Team streaming commit chunk #{chunk_count}")
 
-            # Convert chunk to dict
-            event_data = _event_to_dict(chunk)
-            collector.observe(event_data)
-            humanize_billing_error(event_data)
+                # Convert chunk to dict
+                event_data = _event_to_dict(chunk)
+                collector.observe(event_data)
+                failure = run_error_event(event_data, usage_service.model_of(team)[0])
+                if failure is not None:
+                    if not event_data.get("parent_run_id"):
+                        yield _format_sse_event("error", failure)
+                        return
+                    event_data = failure
 
-            # Accumulate the answer text
-            if isinstance(event_data.get("content"), str):
-                full_output_text += event_data["content"]
+                # Accumulate the answer text
+                if isinstance(event_data.get("content"), str):
+                    full_output_text += event_data["content"]
 
-            # Process tools using shared helper function
-            _process_tools_in_event(event_data)
+                # Process tools using shared helper function
+                _process_tools_in_event(event_data)
 
-            yield _format_sse_event("message", event_data)
+                yield _format_sse_event("message", event_data)
 
     except (asyncio.CancelledError, GeneratorExit):
         # The client hung up mid-stream. Record the run as cancelled, not completed:
         # its final metrics never arrived (api/services/usage.py, disconnect()).
         collector.disconnect()
         raise
+    except (ModelAuthenticationError, ModelProviderError) as e:
+        collector.fail(f"{type(e).__name__}: {e}")
+        yield _format_sse_event("error", error_payload(usage_service.model_of(team)[0], e))
     except Exception as e:
         # Log the error and send error event to client
         logging.error(f"Error during team streaming commit response: {type(e).__name__}: {str(e)}")
@@ -1100,10 +1108,15 @@ async def commit_team_run_v2(
         collector.observe_response(response)
         token_usage = await record_usage(collector)
 
-        # Clean up run cache
+        # Clean up run cache. A failed run is dropped too: agno leaves a continued run's
+        # tool results out of its stored messages, so a retry would send the model a call with no result.
         with _team_run_cache_lock:
             if body.run_id in _team_run_cache:
                 del _team_run_cache[body.run_id]
+
+        failure_response = failed_run_response(response, usage_service.model_of(team)[0])
+        if failure_response is not None:
+            return failure_response
 
         return TeamRunResponse(
             content=response.content or "",  # type: ignore[arg-type]

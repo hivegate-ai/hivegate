@@ -345,3 +345,186 @@ def test_stream_passes_through_unfamiliar_and_successful_events(route):
     assert [json.loads(frame.split("data: ", 1)[1]) for frame in frames] == events
     assert len(route.recorded) == 1
     assert route.recorded[0].status == "completed"
+
+
+class Resumer(Runner):
+    """A paused run's agent or team: `acontinue_run` fails like `arun` does in Runner."""
+
+    def acontinue_run(self, *args, stream=False, **kwargs):
+        return self.arun(stream=stream)
+
+
+@pytest.fixture(params=["agent", "team"])
+def commit(request, monkeypatch):
+    from api.routes.v2 import agents, teams
+    from api.routes.v2_router import get_v2_router
+
+    from agents.hitl import CachedRun, ChatContext
+
+    monkeypatch.setenv("AUTH_DISABLED", "true")
+    agents._run_cache.clear()
+    teams._team_run_cache.clear()
+    _, app = create_test_client()
+    app.include_router(get_v2_router())
+    client = TestClient(app)
+    recorded = []
+
+    async def record(collector):
+        recorded.append(collector)
+
+    monkeypatch.setattr(agents, "record_usage", record)
+    monkeypatch.setattr(teams, "record_usage", record)
+    monkeypatch.setattr(teams, "get_team_info", lambda *args: SimpleNamespace(name="Test", mode="coordinate"))
+    monkeypatch.setattr(teams, "get_team_agents", lambda *args: [SimpleNamespace(agent_id="member", order_index=1)])
+    monkeypatch.setattr(teams, "get_agent", lambda **kwargs: object())
+    monkeypatch.setattr(teams, "get_db_url", lambda: "postgresql://unused")
+    team = request.param == "team"
+    cache = teams._team_run_cache if team else agents._run_cache
+
+    def post(runner, stream=False):
+        monkeypatch.setattr(agents, "get_agent", AsyncMock(return_value=(runner, None, "key", None)))
+        monkeypatch.setattr(teams, "create_team", lambda **kwargs: runner)
+        cache["paused"] = CachedRun(SimpleNamespace(tools=[], requirements=None), ChatContext(None, "u1", "s1", "test"))
+        path = "/v2/teams/test/runs/commit" if team else "/v2/agents/test/chat/commit"
+        body = {"run_id": "paused", "updated_tools": [], "model": MODEL, "user_id": "u1", "session_id": "s1"}
+        return client.post(path, json={**body, "stream": stream})
+
+    yield SimpleNamespace(
+        kind=request.param,
+        post=post,
+        recorded=recorded,
+        output=TeamRunOutput if team else RunOutput,
+        prefix="Team" if team else "",
+        cache=cache,
+    )
+    client.close()
+    agents._run_cache.clear()
+    teams._team_run_cache.clear()
+
+
+def test_failed_commit_returns_non_2xx_and_drops_the_run(commit):
+    result = commit.output(run_id="paused", status=RunStatus.error, content=RAW_ERROR)
+    response = commit.post(Resumer(result=result))
+    assert_safe_error(response)
+    assert response.json()["error_code"] == "model_provider_error"
+    assert "paused" not in commit.cache
+    assert len(commit.recorded) == 1
+    assert commit.recorded[0].status == "error"
+
+
+def test_completed_commit_keeps_its_success_response(commit):
+    result = commit.output(run_id="paused", status=RunStatus.completed, content=RAW_ERROR)
+    response = commit.post(Resumer(result=result))
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "completed"
+    assert response.json()["content"] == RAW_ERROR
+    assert "paused" not in commit.cache
+
+
+@pytest.mark.parametrize("commit", ["agent"], indirect=True)
+@pytest.mark.parametrize("error_type", STREAM_ERROR_TYPES)
+def test_streamed_commit_failure_sends_terminal_error_event(commit, error_type):
+    runner = Resumer(
+        events=[
+            {"event": "RunContinued", "run_id": "paused"},
+            {"event": "RunContent", "run_id": "paused", "content": "Partial answer"},
+            {**error_event(commit, error_type), "run_id": "paused"},
+            {"event": "RunContent", "run_id": "paused", "content": "Must not arrive after failure"},
+        ]
+    )
+    response = commit.post(runner, stream=True)
+    assert_stream_error(response)
+    assert "Partial answer" in response.text
+    assert "Must not arrive after failure" not in response.text
+    assert "paused" not in commit.cache
+    assert len(commit.recorded) == 1
+    assert commit.recorded[0].status == "error"
+    assert runner.closed
+
+
+@pytest.mark.parametrize("commit", ["agent"], indirect=True)
+@pytest.mark.parametrize("error_class", [ModelProviderError, ModelAuthenticationError])
+def test_thrown_provider_error_on_streamed_commit_sends_error_event(commit, error_class):
+    runner = Resumer(
+        events=[{"event": "RunContinued", "run_id": "paused"}], exception=error_class(RAW_ERROR, status_code=401)
+    )
+    assert_stream_error(commit.post(runner, stream=True))
+    assert "paused" not in commit.cache
+    assert "secret-provider-token" in commit.recorded[0].error  # details stay server-side
+
+
+async def _team_commit_stream(runner):
+    # Team commits don't stream yet (the route ignores `stream`), so drive the streamer itself.
+    from api.routes.v2 import teams
+
+    body = teams.TeamCommitRequest(run_id="paused", updated_tools=[], model=MODEL)
+    cached = SimpleNamespace(tools=[], requirements=None)
+    return "".join([frame async for frame in teams.commit_team_response_streamer(runner, body, cached)])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", STREAM_ERROR_TYPES)
+async def test_team_commit_stream_failure_sends_terminal_error_event(monkeypatch, error_type):
+    from api.routes.v2 import teams
+
+    monkeypatch.setattr(teams, "record_usage", AsyncMock())
+    event = {"event": "TeamRunError", "run_id": "paused", "content": RAW_ERROR}
+    if error_type is not None:
+        event["error_type"] = error_type
+    runner = Resumer(
+        events=[
+            {"event": "TeamRunContinued", "run_id": "paused"},
+            event,
+            {"event": "TeamRunContent", "run_id": "paused", "content": "Must not arrive after failure"},
+        ]
+    )
+    text = await _team_commit_stream(runner)
+    assert_stream_error(SimpleNamespace(status_code=200, text=text))
+    assert "Must not arrive after failure" not in text
+    assert runner.closed
+
+
+@pytest.mark.asyncio
+async def test_team_commit_stream_member_error_does_not_end_the_stream(monkeypatch):
+    from api.routes.v2 import teams
+
+    monkeypatch.setattr(teams, "record_usage", AsyncMock())
+    member_error = {"event": "RunError", "run_id": "child", "parent_run_id": "paused", "content": RAW_ERROR}
+    runner = Resumer(
+        events=[
+            member_error,
+            {"event": "TeamRunContent", "run_id": "paused", "content": "Recovered answer"},
+            {"event": "TeamRunCompleted", "run_id": "paused"},
+        ]
+    )
+    text = await _team_commit_stream(runner)
+    assert "Recovered answer" in text
+    assert "event: error\n" not in text
+    assert "secret-provider-token" not in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_class", [ModelProviderError, ModelAuthenticationError])
+async def test_team_commit_stream_thrown_provider_error_sends_error_event(monkeypatch, error_class):
+    from api.routes.v2 import teams
+
+    monkeypatch.setattr(teams, "record_usage", AsyncMock())
+    runner = Resumer(events=[{"event": "TeamRunContinued", "run_id": "paused"}], exception=error_class(RAW_ERROR, 401))
+    text = await _team_commit_stream(runner)
+    assert_stream_error(SimpleNamespace(status_code=200, text=text))
+
+
+# Team commits don't stream yet (#246).
+@pytest.mark.parametrize(
+    ("commit", "stream"), [("agent", False), ("agent", True), ("team", False)], indirect=["commit"]
+)
+def test_billing_error_on_commit_keeps_its_actionable_message(commit, stream):
+    message = "credit balance is too low; secret-provider-token"
+    event = {"event": commit.prefix + "RunError", "run_id": "paused", "content": message}
+    result = commit.output(run_id="paused", status=RunStatus.error, content=message)
+    response = commit.post(Resumer(result=result, events=[event]), stream=stream)
+    assert response.status_code == (200 if stream else 502), response.text
+    body = json.loads(response.text.strip().split("\n\n")[-1].split("data: ", 1)[1]) if stream else response.json()
+    assert body["error_code"] == "provider_billing"
+    assert "credits" in body["detail"]
+    assert "secret-provider-token" not in response.text
