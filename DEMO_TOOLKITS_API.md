@@ -318,6 +318,16 @@ The run resumes as with any other commit, even when every call is declined. A de
 }
 ```
 
+**Response (Model Error)**: On the gateway's agent and team commit routes, if the model call that follows the decisions fails, the commit answers like a failed chat: a 502 with `error_code`, or a final SSE `error` event when an agent commit streams. The paused run is dropped. Approved calls run before the model is called, so they may already have run; check before sending the request again:
+```json
+{
+  "status": "error",
+  "error": "Model provider failed for gemini-2.5-pro; check GOOGLE_API_KEY, provider credits, and model availability.",
+  "detail": "Model provider failed for gemini-2.5-pro; check GOOGLE_API_KEY, provider credits, and model availability.",
+  "error_code": "model_provider_error"
+}
+```
+
 **Example cURL**:
 ```bash
 curl -X POST http://localhost:8080/chat/commit \

@@ -26,9 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not reply. Now the declined calls don't run, the model is told they were declined (with the
   `confirmation_note`, if any), and the commit returns the model's reply, streamed when `stream`
   is true for agents. A client that relied on `cancelled` for a declined batch will now get a
-  completed run. Like any commit, a declined one now calls the model, so it is metered, and a
-  model error leaves the run paused for a retry. A commit that declines every call for a run
-  that is no longer cached still gets the `cancelled` reply (#245)
+  completed run. Like any commit, a declined one now calls the model, so it is metered. If the
+  model call fails, the paused run is dropped (see the commit fix under **Fixed**). A commit that
+  declines every call for a run that is no longer cached still gets the `cancelled` reply (#245)
 - The agent and team commit routes now accept a decision only from the chat that started the run:
   the same API key (when auth is on), `user_id`, `session_id`, and agent or team id. While the
   run is cached, a commit from any other chat gets a 403 and leaves the run as it was. Before, a
@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agno 3.2.0 or later, which records it (#253)
 
 ### Fixed
+- A failed model call on an agent or team commit now answers like a failed chat: HTTP 502 with
+  `error_code`, or a final SSE `error` event for a streamed agent commit, without the provider's error text.
+  It used to answer 200 with `status: completed`, and a streamed commit passed the provider's raw
+  error on as an ordinary event. The paused run is dropped, not kept for a retry: agno runs the
+  approved calls before it calls the model, so they may already have run. Check before sending
+  the request again (#265)
 - Leaving `SERVICE_PROMPTS` unset no longer fills the log with `PromptsServiceClient not properly
   configured` errors, several per request. It is optional, so the gateway now logs one INFO line
   at startup saying the prompts service is disabled, and the per-call message is DEBUG. A set

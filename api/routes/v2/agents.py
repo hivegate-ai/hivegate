@@ -34,7 +34,6 @@ from agents.agent import normalize_toolkits, slug_to_table_name
 from agents.gemini_api import gemini_http_options
 from agents.model_factory import ProviderNotConfiguredError
 from agents.model_resolver import resolve_model_id
-from agents.provider_models import humanize_billing_error
 from agents.v2_selector import _get_prompt_from_local_storage
 from api.provider_errors import error_payload, failed_run_response, run_error_event
 from api.services import usage as usage_service
@@ -733,32 +732,41 @@ async def commit_response_streamer_v2(
     collector.input_text = "[commit continuation]"
 
     try:
-        async for chunk in run_response:
-            chunk_count += 1
-            if chunk_count % 10 == 0:  # Log every 10 chunks to avoid excessive logging
-                logging.debug(f"V2 streaming commit chunk #{chunk_count}")
+        async with aclosing(cast(AsyncGenerator[Any, None], run_response)):
+            async for chunk in run_response:
+                chunk_count += 1
+                if chunk_count % 10 == 0:  # Log every 10 chunks to avoid excessive logging
+                    logging.debug(f"V2 streaming commit chunk #{chunk_count}")
 
-            # Convert chunk to dict
-            event_data = _event_to_dict(chunk)
-            collector.observe(event_data)
-            humanize_billing_error(event_data)
+                # Convert chunk to dict
+                event_data = _event_to_dict(chunk)
+                collector.observe(event_data)
+                failure = run_error_event(event_data, body.model)
+                if failure is not None:
+                    if not event_data.get("parent_run_id"):
+                        yield _format_sse_event("error", failure)
+                        return
+                    event_data = failure
 
-            # Only text content is part of the answer. Reasoning (and some other)
-            # events can carry a dict `content`; str-concatenating those raised
-            # "can only concatenate str (not dict) to str" and aborted the stream.
-            if isinstance(event_data.get("content"), str):
-                full_output_text += event_data["content"]
+                # Only text content is part of the answer. Reasoning (and some other)
+                # events can carry a dict `content`; str-concatenating those raised
+                # "can only concatenate str (not dict) to str" and aborted the stream.
+                if isinstance(event_data.get("content"), str):
+                    full_output_text += event_data["content"]
 
-            # Process tools using shared helper function
-            _process_tools_in_event(event_data)
+                # Process tools using shared helper function
+                _process_tools_in_event(event_data)
 
-            yield _format_sse_event("message", event_data)
+                yield _format_sse_event("message", event_data)
 
     except (asyncio.CancelledError, GeneratorExit):
         # The client hung up mid-stream. Record the run as cancelled, not completed:
         # its final metrics never arrived (api/services/usage.py, disconnect()).
         collector.disconnect()
         raise
+    except (ModelAuthenticationError, ModelProviderError) as e:
+        collector.fail(f"{type(e).__name__}: {e}")
+        yield _format_sse_event("error", error_payload(body.model, e))
     except Exception as e:
         # Log the error and send error event to client
         logging.error(f"Error during streaming commit response: {type(e).__name__}: {str(e)}")
@@ -1751,9 +1759,14 @@ async def commit_agent_chat_v2(
             collector.observe_response(response)
             token_usage = await record_usage(collector)
 
-            # Clean up run cache
+            # Clean up run cache. A failed run is dropped too: agno leaves a continued run's
+            # tool results out of its stored messages, so a retry would send the model a call with no result.
             if body.run_id in _run_cache:
                 del _run_cache[body.run_id]
+
+            failure_response = failed_run_response(response, body.model)
+            if failure_response is not None:
+                return failure_response
 
             return ChatResponse(
                 content=response.content,  # type: ignore[arg-type]
